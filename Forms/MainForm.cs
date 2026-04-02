@@ -1,5 +1,6 @@
 using HistorianSyncTool.Properties;
 using HistorianSyncTool.Services;
+using HistorianSyncTool.UI;
 using HistorianSyncTool.UI.Controls;
 using System;
 using System.Drawing;

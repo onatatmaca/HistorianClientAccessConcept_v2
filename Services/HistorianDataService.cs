@@ -57,7 +57,7 @@ namespace HistorianSyncTool.Services
         {
             return Retry(() =>
             {
-                DataQueryParams query = new InterpolatedQuery(from, to, count, tagName)
+                DataQueryParams query = new InterpolatedQuery(from, to, (uint)count, tagName)
                 {
                     Fields = DataFields.Time | DataFields.Value | DataFields.Quality
                 };
