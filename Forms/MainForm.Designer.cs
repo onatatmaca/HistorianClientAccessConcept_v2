@@ -31,14 +31,10 @@ namespace HistorianSyncTool.Forms
         // Left — Connection
         private SectionHeader  hdrConnection;
         private Label          lblPrimary;
-        private Panel          pnlPrimaryRow;
         private TextBox        txtPrimary;
-        private ConnectionDot  dotPrimary;
         private Label          lblPrimaryStatus;
         private Label          lblSecondary;
-        private Panel          pnlSecondaryRow;
         private TextBox        txtSecondary;
-        private ConnectionDot  dotSecondary;
         private Label          lblSecondaryStatus;
         private FlatButton     btnConnect;
 
@@ -133,6 +129,7 @@ namespace HistorianSyncTool.Forms
             this.Size          = new Size(1380, 820);
             this.Text          = "Historian Sync Tool";
             this.StartPosition = FormStartPosition.CenterScreen;
+            this.Padding       = new Padding(8, 4, 8, 0);  // breathing room around all panels
 
             // ══════════════════════════════════════════════════════════════════════
             // STATUS BAR  (Dock=Bottom)
@@ -213,74 +210,45 @@ namespace HistorianSyncTool.Forms
                 Padding    = new Padding(0, 0, 1, 0)
             };
 
-            int lw = AppTheme.LeftPanelWidth - 2;   // usable width
+            // fw = full width (section header bars span edge-to-edge within the panel)
+            // pad = left indent for content controls
+            // lw  = usable width for indented content
+            int fw  = AppTheme.LeftPanelWidth - 2;
+            const int pad = 8;
+            int lw  = fw - pad * 2;
 
             // ── CONNECTION ─────────────────────────────────────────────────────────
-            hdrConnection = new SectionHeader { Text = "CONNECTION", Width = lw, Left = 0, Top = 0 };
+            hdrConnection = new SectionHeader { Text = "CONNECTION", Width = fw, Left = 0, Top = 0 };
 
-            var pnlConnContent = new Panel { Left = 0, Top = hdrConnection.Bottom, Width = lw };
+            var pnlConnContent = new Panel { Left = 0, Top = hdrConnection.Bottom, Width = fw };
 
-            // Primary row
-            lblPrimary = MakeLabel("Primary server", lw, 0, 8);
-
-            pnlPrimaryRow = new Panel
-            {
-                Left = 0, Top = lblPrimary.Bottom + 2, Width = lw, Height = AppTheme.ControlHeight
-            };
-            txtPrimary = new TextBox
-            {
-                Left = 0, Top = 0, Width = lw - 22, Height = AppTheme.ControlHeight,
-                Font = AppTheme.Default, BorderStyle = BorderStyle.FixedSingle
-            };
-            dotPrimary = new ConnectionDot
-            {
-                Left = txtPrimary.Right + 4, Top = (AppTheme.ControlHeight - 14) / 2
-            };
-            pnlPrimaryRow.Controls.Add(txtPrimary);
-            pnlPrimaryRow.Controls.Add(dotPrimary);
-
+            lblPrimary = MakeLabel("Primary server", lw, pad, 8);
+            txtPrimary = MakeTextBox(lw, pad, lblPrimary.Bottom + 2);
             lblPrimaryStatus = new Label
             {
                 Text = "Not connected",
-                Left = 2, Top = pnlPrimaryRow.Bottom + 2,
+                Left = pad, Top = txtPrimary.Bottom + 2,
                 Width = lw, Height = 16,
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary, AutoSize = false
             };
 
-            // Secondary row
-            lblSecondary = MakeLabel("Secondary server", lw, 0, lblPrimaryStatus.Bottom + 6);
-
-            pnlSecondaryRow = new Panel
-            {
-                Left = 0, Top = lblSecondary.Bottom + 2, Width = lw, Height = AppTheme.ControlHeight
-            };
-            txtSecondary = new TextBox
-            {
-                Left = 0, Top = 0, Width = lw - 22, Height = AppTheme.ControlHeight,
-                Font = AppTheme.Default, BorderStyle = BorderStyle.FixedSingle
-            };
-            dotSecondary = new ConnectionDot
-            {
-                Left = txtSecondary.Right + 4, Top = (AppTheme.ControlHeight - 14) / 2
-            };
-            pnlSecondaryRow.Controls.Add(txtSecondary);
-            pnlSecondaryRow.Controls.Add(dotSecondary);
-
+            lblSecondary = MakeLabel("Secondary server", lw, pad, lblPrimaryStatus.Bottom + 6);
+            txtSecondary = MakeTextBox(lw, pad, lblSecondary.Bottom + 2);
             lblSecondaryStatus = new Label
             {
                 Text = "Not connected",
-                Left = 2, Top = pnlSecondaryRow.Bottom + 2,
+                Left = pad, Top = txtSecondary.Bottom + 2,
                 Width = lw, Height = 16,
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary, AutoSize = false
             };
 
-            btnConnect = MakeButton("Connect", lw, 0, lblSecondaryStatus.Bottom + 8);
+            btnConnect = MakeButton("Connect", lw, pad, lblSecondaryStatus.Bottom + 8);
             btnConnect.Click += btnConnect_Click;
 
             pnlConnContent.Controls.AddRange(new Control[]
             {
-                lblPrimary, pnlPrimaryRow, lblPrimaryStatus,
-                lblSecondary, pnlSecondaryRow, lblSecondaryStatus,
+                lblPrimary, txtPrimary, lblPrimaryStatus,
+                lblSecondary, txtSecondary, lblSecondaryStatus,
                 btnConnect
             });
             pnlConnContent.Height = btnConnect.Bottom + 10;
@@ -288,55 +256,54 @@ namespace HistorianSyncTool.Forms
             // ── EVALUATION PERIOD (includes gap analysis mode radios) ──────────────
             hdrPeriod = new SectionHeader
             {
-                Text = "EVALUATION PERIOD", Width = lw, Left = 0,
+                Text = "EVALUATION PERIOD", Width = fw, Left = 0,
                 Top  = hdrConnection.Bottom + pnlConnContent.Height
             };
 
-            var pnlPeriodContent = new Panel { Left = 0, Top = hdrPeriod.Bottom, Width = lw };
+            var pnlPeriodContent = new Panel { Left = 0, Top = hdrPeriod.Bottom, Width = fw };
 
-            lblStartDate = MakeLabel("Start date", lw, 0, 8);
-            dtpStart     = MakeDtp(lw, 0, lblStartDate.Bottom + 2);
-            lblEndDate   = MakeLabel("End date", lw, 0, dtpStart.Bottom + 6);
-            dtpEnd       = MakeDtp(lw, 0, lblEndDate.Bottom + 2);
+            lblStartDate = MakeLabel("Start date", lw, pad, 8);
+            dtpStart     = MakeDtp(lw, pad, lblStartDate.Bottom + 2);
+            lblEndDate   = MakeLabel("End date", lw, pad, dtpStart.Bottom + 6);
+            dtpEnd       = MakeDtp(lw, pad, lblEndDate.Bottom + 2);
 
             // Quick-select presets
-            pnlQuickDates = new Panel { Left = 0, Top = dtpEnd.Bottom + 6, Width = lw, Height = 24 };
+            pnlQuickDates = new Panel { Left = pad, Top = dtpEnd.Bottom + 6, Width = lw, Height = 24 };
             int qw = (lw - 8) / 3;
             btnLast7d   = MakeQuickBtn("Last 7 days",  0);
             btnLast30d  = MakeQuickBtn("Last 30 days", qw + 4);
             btnLastYear = MakeQuickBtn("Last year",    (qw + 4) * 2);
             btnLast7d.Width = btnLast30d.Width = btnLastYear.Width = qw;
-            btnLast7d.Click   += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-7);   dtpEnd.Value = System.DateTime.Now; };
-            btnLast30d.Click  += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-30);  dtpEnd.Value = System.DateTime.Now; };
-            btnLastYear.Click += (s, e) => { dtpStart.Value = System.DateTime.Now.AddYears(-1);  dtpEnd.Value = System.DateTime.Now; };
+            btnLast7d.Click   += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-7);  dtpEnd.Value = System.DateTime.Now; };
+            btnLast30d.Click  += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-30); dtpEnd.Value = System.DateTime.Now; };
+            btnLastYear.Click += (s, e) => { dtpStart.Value = System.DateTime.Now.AddYears(-1); dtpEnd.Value = System.DateTime.Now; };
             pnlQuickDates.Controls.Add(btnLast7d);
             pnlQuickDates.Controls.Add(btnLast30d);
             pnlQuickDates.Controls.Add(btnLastYear);
 
-            // Mode selector (directly above Analyze Gaps)
+            // Mode selector sits directly above Analyze Gaps
             lblModeHeader = new Label
             {
-                Text = "Analyze by:", Left = 0, Top = pnlQuickDates.Bottom + 10,
+                Text = "Analyze by:", Left = pad, Top = pnlQuickDates.Bottom + 10,
                 Width = lw, Height = 16,
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary, AutoSize = false
             };
-
             radioHistSync = new RadioButton
             {
                 Text = "HistSync heartbeat tag",
-                Left = 8, Top = lblModeHeader.Bottom + 2, Width = lw - 8,
+                Left = pad + 4, Top = lblModeHeader.Bottom + 2, Width = lw - 4,
                 Font = AppTheme.Default, ForeColor = AppTheme.TextPrimary, Checked = true
             };
             radioSelectedTag = new RadioButton
             {
                 Text = "Currently selected tag",
-                Left = 8, Top = radioHistSync.Bottom + 2, Width = lw - 8,
+                Left = pad + 4, Top = radioHistSync.Bottom + 2, Width = lw - 4,
                 Font = AppTheme.Default, ForeColor = AppTheme.TextPrimary
             };
             radioHistSync.CheckedChanged    += radioMode_CheckedChanged;
             radioSelectedTag.CheckedChanged += radioMode_CheckedChanged;
 
-            btnAnalyzeGaps = MakeButton("Analyze Gaps", lw, 0, radioSelectedTag.Bottom + 8);
+            btnAnalyzeGaps = MakeButton("Analyze Gaps", lw, pad, radioSelectedTag.Bottom + 8);
             btnAnalyzeGaps.Click += btnAnalyzeGaps_Click;
 
             pnlPeriodContent.Controls.AddRange(new Control[]
@@ -351,18 +318,18 @@ namespace HistorianSyncTool.Forms
             // ── TAGS ──────────────────────────────────────────────────────────────
             hdrTags = new SectionHeader
             {
-                Text = "TAGS", Width = lw, Left = 0,
+                Text = "TAGS", Width = fw, Left = 0,
                 Top  = hdrPeriod.Bottom + pnlPeriodContent.Height
             };
 
-            var pnlTagsContent = new Panel { Left = 0, Top = hdrTags.Bottom, Width = lw };
+            var pnlTagsContent = new Panel { Left = 0, Top = hdrTags.Bottom, Width = fw };
 
-            lblTagnameFilter = MakeLabel("Tagname filter", lw, 0, 8);
-            txtTagnameFilter = MakeTextBox(lw, 0, lblTagnameFilter.Bottom + 2);
+            lblTagnameFilter = MakeLabel("Tagname filter", lw, pad, 8);
+            txtTagnameFilter = MakeTextBox(lw, pad, lblTagnameFilter.Bottom + 2);
 
             pnlTagButtons = new Panel
             {
-                Left = 0, Top = txtTagnameFilter.Bottom + 6, Width = lw, Height = AppTheme.ButtonHeight
+                Left = pad, Top = txtTagnameFilter.Bottom + 6, Width = lw, Height = AppTheme.ButtonHeight
             };
             btnBrowseTags = MakeButton("Browse Tags",  (lw - 4) / 2, 0, 0);
             btnGetStats   = MakeButton("Server Stats", (lw - 4) / 2, btnBrowseTags.Right + 4, 0);
@@ -373,10 +340,10 @@ namespace HistorianSyncTool.Forms
             pnlTagButtons.Controls.Add(btnBrowseTags);
             pnlTagButtons.Controls.Add(btnGetStats);
 
-            lblPrimaryTag   = MakeLabel("Primary tag",   lw, 0, pnlTagButtons.Bottom + 6);
-            cboPrimary      = MakeCombo(lw, 0, lblPrimaryTag.Bottom + 2);
-            lblSecondaryTag = MakeLabel("Secondary tag", lw, 0, cboPrimary.Bottom + 6);
-            cboSecondary    = MakeCombo(lw, 0, lblSecondaryTag.Bottom + 2);
+            lblPrimaryTag   = MakeLabel("Primary tag",   lw, pad, pnlTagButtons.Bottom + 6);
+            cboPrimary      = MakeCombo(lw, pad, lblPrimaryTag.Bottom + 2);
+            lblSecondaryTag = MakeLabel("Secondary tag", lw, pad, cboPrimary.Bottom + 6);
+            cboSecondary    = MakeCombo(lw, pad, lblSecondaryTag.Bottom + 2);
 
             pnlTagsContent.Controls.AddRange(new Control[]
             {
@@ -406,28 +373,31 @@ namespace HistorianSyncTool.Forms
                 e.Graphics.DrawLine(new Pen(AppTheme.Border), 0, 0, 0, pnlRight.Height);
 
             pnlRightContent = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1, 0, 0, 0) };
-            int rw = AppTheme.RightPanelWidth - 2;
+            int rw  = AppTheme.RightPanelWidth - 2;
+            const int rpad = 8;
+            int rlw = rw - rpad * 2;
 
             hdrGapAnalysis = new SectionHeader { Text = "GAP ANALYSIS", Left = 0, Top = 0, Width = rw };
 
-            lblPrimaryGap = MakeLabel("Primary server coverage", rw, 0, hdrGapAnalysis.Bottom + 10);
-            barPrimary    = new CoverageBar { Left = 0, Top = lblPrimaryGap.Bottom + 3, Width = rw, Height = 30 };
+            lblPrimaryGap = MakeLabel("Primary server coverage", rlw, rpad, hdrGapAnalysis.Bottom + 10);
+            barPrimary    = new CoverageBar { Left = rpad, Top = lblPrimaryGap.Bottom + 3, Width = rlw, Height = 28 };
 
-            lblSecondaryGap = MakeLabel("Secondary server coverage", rw, 0, barPrimary.Bottom + 10);
-            barSecondary    = new CoverageBar { Left = 0, Top = lblSecondaryGap.Bottom + 3, Width = rw, Height = 30 };
+            lblSecondaryGap = MakeLabel("Secondary server coverage", rlw, rpad, barPrimary.Bottom + 10);
+            barSecondary    = new CoverageBar { Left = rpad, Top = lblSecondaryGap.Bottom + 3, Width = rlw, Height = 28 };
 
             lblGapSummary = new Label
             {
-                Text = "Run 'Analyze Gaps' to see results",
-                Left = 0, Top = barSecondary.Bottom + 8,
-                Width = rw, Height = 18,
-                Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary, AutoSize = false
+                Text = "Connect to both servers, then click 'Analyze Gaps'",
+                Left = rpad, Top = barSecondary.Bottom + 8,
+                Width = rlw, Height = 32,
+                Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary,
+                AutoSize = false
             };
 
             gridGaps = new System.Windows.Forms.DataGridView
             {
-                Left   = 0, Top = lblGapSummary.Bottom + 4,
-                Width  = rw, Height = 220,
+                Left   = rpad, Top = lblGapSummary.Bottom + 4,
+                Width  = rlw,  Height = 200,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
             };
             SetupGapGrid();
@@ -435,7 +405,7 @@ namespace HistorianSyncTool.Forms
             btnBackfillPreview = new FlatButton
             {
                 Text   = "Preview & Backfill…",
-                Left   = 0, Width = rw,
+                Left   = rpad, Width = rlw,
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
             btnBackfillPreview.Click += btnBackfillPreview_Click;
@@ -444,7 +414,7 @@ namespace HistorianSyncTool.Forms
             {
                 Text        = "■  Stop",
                 ButtonStyle = FlatButtonStyle.Danger,
-                Left        = 0, Width = rw,
+                Left        = rpad, Width = rlw,
                 Visible     = false,
                 Anchor      = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -508,8 +478,8 @@ namespace HistorianSyncTool.Forms
             pnlLower = new CollapsiblePanel
             {
                 Dock           = DockStyle.Bottom,
-                Title          = "WRITE DATA & MULTIFIELD TAGS",
-                ExpandedHeight = 160
+                Title          = "WRITE DATA  |  MULTIFIELD TAGS",
+                ExpandedHeight = 185
             };
             pnlLower.IsExpanded = false;
 
@@ -523,8 +493,8 @@ namespace HistorianSyncTool.Forms
             pnlLower.Content.Controls.Add(tabLower);
 
             // ── Grid area  (Dock=Fill) — 2-row × 3-col TableLayoutPanel ──────────
-            // Row 0: Read buttons above their respective grids
-            // Row 1: Primary grid | Action buttons | Secondary grid
+            //   Row 0: [Read Primary btn | spacer | Read Secondary btn]   38px
+            //   Row 1: [gridPrimary | action buttons | gridSecondary]     fill
             pnlGrids = new TableLayoutPanel
             {
                 Dock        = DockStyle.Fill,
@@ -534,10 +504,10 @@ namespace HistorianSyncTool.Forms
                 Padding     = new Padding(6)
             };
             pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  50f));
-            pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128));   // action column
+            pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 156)); // action column
             pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  50f));
-            pnlGrids.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));           // button row
-            pnlGrids.RowStyles.Add(new RowStyle(SizeType.Percent,  100f));         // grid row
+            pnlGrids.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));       // button row
+            pnlGrids.RowStyles.Add(new RowStyle(SizeType.Percent,  100f));      // grid row
 
             // Row 0 — Read buttons, each directly above its grid
             var pnlReadLeft = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(0, 2, 4, 2) };
@@ -546,32 +516,59 @@ namespace HistorianSyncTool.Forms
             pnlReadLeft.Controls.Add(btnReadPrimary);
 
             var pnlReadRight = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(4, 2, 0, 2) };
-            btnReadSecondary = new FlatButton { Text = "Read Secondary", Dock = DockStyle.Fill, ButtonStyle = FlatButtonStyle.Secondary };
+            btnReadSecondary = new FlatButton { Text = "Read Secondary", Dock = DockStyle.Fill };
             btnReadSecondary.Click += btnReadSecondary_Click;
             pnlReadRight.Controls.Add(btnReadSecondary);
 
-            // Row 1 — Data grids
+            // Row 1 — Data grids with empty-state placeholder text
             gridPrimary   = new System.Windows.Forms.DataGridView { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 3, 0) };
             gridSecondary = new System.Windows.Forms.DataGridView { Dock = DockStyle.Fill, Margin = new Padding(3, 0, 0, 0) };
 
-            // Row 1 — Action column (Compare + write operations)
+            gridPrimary.Paint += (s, e) =>
+            {
+                var dg = (System.Windows.Forms.DataGridView)s;
+                if (dg.Rows.Count > 0) return;
+                System.Windows.Forms.TextRenderer.DrawText(e.Graphics,
+                    "Select a Primary tag and click  'Read Primary'  to load data",
+                    AppTheme.Default,
+                    new Rectangle(0, dg.ColumnHeadersHeight, dg.Width, dg.Height - dg.ColumnHeadersHeight),
+                    AppTheme.TextSecondary,
+                    System.Windows.Forms.TextFormatFlags.HorizontalCenter |
+                    System.Windows.Forms.TextFormatFlags.VerticalCenter   |
+                    System.Windows.Forms.TextFormatFlags.WordBreak);
+            };
+
+            gridSecondary.Paint += (s, e) =>
+            {
+                var dg = (System.Windows.Forms.DataGridView)s;
+                if (dg.Rows.Count > 0) return;
+                System.Windows.Forms.TextRenderer.DrawText(e.Graphics,
+                    "Select a Secondary tag and click  'Read Secondary'  to load data",
+                    AppTheme.Default,
+                    new Rectangle(0, dg.ColumnHeadersHeight, dg.Width, dg.Height - dg.ColumnHeadersHeight),
+                    AppTheme.TextSecondary,
+                    System.Windows.Forms.TextFormatFlags.HorizontalCenter |
+                    System.Windows.Forms.TextFormatFlags.VerticalCenter   |
+                    System.Windows.Forms.TextFormatFlags.WordBreak);
+            };
+
+            // Row 1 — Action column: read-only Compare + write-caution Copy buttons
             pnlGridActions = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background };
 
-            // Vertically stack buttons with top offset so they sit near the grid center
-            btnCompare         = MakeCenterButton("Compare",         50);
-            btnCopyToPrimary   = MakeCenterButton("← Copy to Pri",   btnCompare.Bottom   + 8);
-            btnCopyToSecondary = MakeCenterButton("Copy to Sec →",   btnCopyToPrimary.Bottom + 4);
+            btnCompare         = MakeCenterButton("Compare",           50);
+            btnCopyToPrimary   = MakeCenterButton("← Copy to Primary", btnCompare.Bottom   + 8);
+            btnCopyToSecondary = MakeCenterButton("Copy to Secondary →", btnCopyToPrimary.Bottom + 4);
 
             btnCompare.ButtonStyle         = FlatButtonStyle.Secondary;
-            btnCopyToPrimary.ButtonStyle   = FlatButtonStyle.Danger;
-            btnCopyToSecondary.ButtonStyle = FlatButtonStyle.Danger;
+            btnCopyToPrimary.ButtonStyle   = FlatButtonStyle.Warning;
+            btnCopyToSecondary.ButtonStyle = FlatButtonStyle.Warning;
             btnCompare.Click           += btnCompare_Click;
             btnCopyToPrimary.Click     += btnCopyToPrimary_Click;
             btnCopyToSecondary.Click   += btnCopyToSecondary_Click;
             pnlGridActions.Controls.AddRange(new Control[]
                 { btnCompare, btnCopyToPrimary, btnCopyToSecondary });
 
-            // Spacer for middle cell in row 0
+            // Spacer for middle cell in button row
             var spacer = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background };
 
             pnlGrids.Controls.Add(pnlReadLeft,    0, 0);
@@ -581,8 +578,8 @@ namespace HistorianSyncTool.Forms
             pnlGrids.Controls.Add(pnlGridActions, 1, 1);
             pnlGrids.Controls.Add(gridSecondary,  2, 1);
 
-            // Assemble center (Bottom controls added before Fill)
-            pnlCenter.Controls.Add(pnlGrids);    // Fill — processed last by WinForms
+            // Assemble center (Bottom controls before Fill)
+            pnlCenter.Controls.Add(pnlGrids);    // Fill
             pnlCenter.Controls.Add(pnlLower);    // Bottom
             pnlCenter.Controls.Add(pnlLog);      // Bottom (outermost)
 
@@ -737,7 +734,7 @@ namespace HistorianSyncTool.Forms
 
         private static FlatButton MakeCenterButton(string text, int top) => new FlatButton
         {
-            Text = text, Left = 4, Top = top, Width = 120,
+            Text = text, Left = 4, Top = top, Width = 148,
             Font = AppTheme.SectionLabel
         };
     }

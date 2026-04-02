@@ -115,21 +115,44 @@ namespace HistorianSyncTool.Forms
 
         private void UpdateConnectionStatus()
         {
+            if (InvokeRequired) { Invoke((Action)UpdateConnectionStatus); return; }
+
             bool pri = _connections.IsPrimaryConnected;
             bool sec = _connections.IsSecondaryConnected;
 
-            dotPrimary.State   = pri ? ConnectionState.Connected : ConnectionState.Disconnected;
-            dotSecondary.State = sec ? ConnectionState.Connected : ConnectionState.Disconnected;
-
             lblPrimaryStatus.Text      = pri ? "Connected" : "Not connected";
             lblPrimaryStatus.ForeColor = pri ? AppTheme.Success : AppTheme.TextSecondary;
-            txtPrimary.BackColor       = pri ? System.Drawing.Color.FromArgb(240, 255, 245) : System.Drawing.SystemColors.Window;
+            txtPrimary.BackColor       = pri ? Color.FromArgb(240, 255, 245) : SystemColors.Window;
 
-            lblSecondaryStatus.Text      = sec ? "Connected" : "Not connected";
+            lblSecondaryStatus.Text      = sec ? "Connected" : (string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : "Not connected");
             lblSecondaryStatus.ForeColor = sec ? AppTheme.Success : AppTheme.TextSecondary;
-            txtSecondary.BackColor       = sec ? System.Drawing.Color.FromArgb(240, 255, 245) : System.Drawing.SystemColors.Window;
+            txtSecondary.BackColor       = sec ? Color.FromArgb(240, 255, 245) : SystemColors.Window;
+
+            dotStatus.State = (pri || sec) ? ConnectionState.Connected : ConnectionState.Disconnected;
 
             UpdateTitleBar();
+        }
+
+        private void SetConnecting()
+        {
+            if (InvokeRequired) { Invoke((Action)SetConnecting); return; }
+            lblPrimaryStatus.Text      = "Connecting…";
+            lblPrimaryStatus.ForeColor = AppTheme.Warning;
+            lblSecondaryStatus.Text    = string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : "Connecting…";
+            lblSecondaryStatus.ForeColor = AppTheme.Warning;
+            dotStatus.State = ConnectionState.Connecting;
+        }
+
+        private void SetConnectionError()
+        {
+            if (InvokeRequired) { Invoke((Action)SetConnectionError); return; }
+            lblPrimaryStatus.Text      = "Connection failed";
+            lblPrimaryStatus.ForeColor = AppTheme.Danger;
+            txtPrimary.BackColor       = SystemColors.Window;
+            lblSecondaryStatus.Text    = string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : "Connection failed";
+            lblSecondaryStatus.ForeColor = AppTheme.Danger;
+            txtSecondary.BackColor     = SystemColors.Window;
+            dotStatus.State = ConnectionState.Error;
         }
 
         private void CancelCurrentOperation()
@@ -148,8 +171,7 @@ namespace HistorianSyncTool.Forms
 
             SetBusy(true, "Connecting...");
             SetStatus("Connecting to servers…");
-            dotPrimary.State   = ConnectionState.Connecting;
-            dotSecondary.State = ConnectionState.Connecting;
+            SetConnecting();
 
             try
             {
@@ -166,15 +188,13 @@ namespace HistorianSyncTool.Forms
             }
             catch (OperationCanceledException)
             {
+                UpdateConnectionStatus();
                 SetStatus("Connection cancelled.");
-                dotPrimary.State   = ConnectionState.Disconnected;
-                dotSecondary.State = ConnectionState.Disconnected;
             }
             catch (Exception ex)
             {
+                SetConnectionError();
                 SetStatus($"Connection failed: {ex.Message}", true);
-                dotPrimary.State   = ConnectionState.Error;
-                dotSecondary.State = ConnectionState.Error;
             }
             finally { SetBusy(false); }
         }
@@ -232,7 +252,7 @@ namespace HistorianSyncTool.Forms
         // ── Get Stats ──────────────────────────────────────────────────────────────
         private void btnGetStats_Click(object sender, EventArgs e)
         {
-            SetStatus("Get Stats — not yet implemented in Phase 1.");
+            Log("Server stats: coming soon.");
         }
 
         // ── Read Data ──────────────────────────────────────────────────────────────
@@ -313,28 +333,28 @@ namespace HistorianSyncTool.Forms
         // ── Compare ────────────────────────────────────────────────────────────────
         private void btnCompare_Click(object sender, EventArgs e)
         {
-            SetStatus("Compare — not yet implemented in Phase 1.");
+            Log("Compare: coming soon.");
         }
 
         private void btnCopyToPrimary_Click(object sender, EventArgs e)
         {
-            SetStatus("Copy to Primary — not yet implemented in Phase 1.");
+            Log("Copy to Primary: run Analyze Gaps first.");
         }
 
         private void btnCopyToSecondary_Click(object sender, EventArgs e)
         {
-            SetStatus("Copy to Secondary — not yet implemented in Phase 1.");
+            Log("Copy to Secondary: run Analyze Gaps first.");
         }
 
         // ── Gap Analysis ───────────────────────────────────────────────────────────
         private void btnAnalyzeGaps_Click(object sender, EventArgs e)
         {
-            SetStatus("Gap Analysis — not yet implemented in Phase 1.");
+            Log("Gap analysis: coming soon.");
         }
 
         private void btnBackfillPreview_Click(object sender, EventArgs e)
         {
-            SetStatus("Backfill — not yet implemented in Phase 1.");
+            Log("Backfill preview: coming soon.");
         }
 
         // ── Stop / Cancel ──────────────────────────────────────────────────────────
@@ -344,7 +364,7 @@ namespace HistorianSyncTool.Forms
         // ── Write Data ─────────────────────────────────────────────────────────────
         private void btnWriteData_Click(object sender, EventArgs e)
         {
-            SetStatus("Write Data — not yet implemented in Phase 1.");
+            Log("Write data: coming soon.");
         }
 
         // ── MultiField Tags ────────────────────────────────────────────────────────
@@ -365,12 +385,12 @@ namespace HistorianSyncTool.Forms
 
         private void btnCreateMultiFieldType_Click(object sender, EventArgs e)
         {
-            SetStatus("Create MultiField Type — not yet implemented in Phase 1.");
+            Log("Create MultiField type: coming soon.");
         }
 
         private void btnWriteMultiField_Click(object sender, EventArgs e)
         {
-            SetStatus("Write MultiField — not yet implemented in Phase 1.");
+            Log("Write MultiField: coming soon.");
         }
 
         // ── Log panel toggle ───────────────────────────────────────────────────────

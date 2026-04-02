@@ -54,10 +54,9 @@ namespace HistorianSyncTool.UI.Controls
 
             if (_coverageRatio < 0)
             {
-                // No data state — gray with "No data" label
+                // No data state — silent grey bar; instruction text is shown below by lblGapSummary
                 using (var brush = new SolidBrush(AppTheme.Border))
                     g.FillRectangle(brush, rc);
-                DrawCenteredLabel(g, "No data", AppTheme.TextSecondary);
                 return;
             }
 

@@ -3,7 +3,7 @@ using System.Windows.Forms;
 
 namespace HistorianSyncTool.UI.Controls
 {
-    public enum FlatButtonStyle { Primary, Secondary, Danger, Success }
+    public enum FlatButtonStyle { Primary, Secondary, Danger, Success, Warning }
 
     /// <summary>
     /// Flat button with hover effect. Style is set via the <see cref="ButtonStyle"/> property.
@@ -46,6 +46,11 @@ namespace HistorianSyncTool.UI.Controls
                 case FlatButtonStyle.Danger:
                     _baseBack = AppTheme.Danger;
                     _hoverBack = Color.FromArgb(200, 60, 48);
+                    _baseFore  = Color.White;
+                    break;
+                case FlatButtonStyle.Warning:
+                    _baseBack = AppTheme.Warning;
+                    _hoverBack = Color.FromArgb(220, 138, 10);
                     _baseFore  = Color.White;
                     break;
                 case FlatButtonStyle.Success:
