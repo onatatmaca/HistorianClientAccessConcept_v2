@@ -115,10 +115,20 @@ namespace HistorianSyncTool.Forms
 
         private void UpdateConnectionStatus()
         {
-            dotPrimary.State   = _connections.IsPrimaryConnected
-                ? ConnectionState.Connected : ConnectionState.Disconnected;
-            dotSecondary.State = _connections.IsSecondaryConnected
-                ? ConnectionState.Connected : ConnectionState.Disconnected;
+            bool pri = _connections.IsPrimaryConnected;
+            bool sec = _connections.IsSecondaryConnected;
+
+            dotPrimary.State   = pri ? ConnectionState.Connected : ConnectionState.Disconnected;
+            dotSecondary.State = sec ? ConnectionState.Connected : ConnectionState.Disconnected;
+
+            lblPrimaryStatus.Text      = pri ? "Connected" : "Not connected";
+            lblPrimaryStatus.ForeColor = pri ? AppTheme.Success : AppTheme.TextSecondary;
+            txtPrimary.BackColor       = pri ? System.Drawing.Color.FromArgb(240, 255, 245) : System.Drawing.SystemColors.Window;
+
+            lblSecondaryStatus.Text      = sec ? "Connected" : "Not connected";
+            lblSecondaryStatus.ForeColor = sec ? AppTheme.Success : AppTheme.TextSecondary;
+            txtSecondary.BackColor       = sec ? System.Drawing.Color.FromArgb(240, 255, 245) : System.Drawing.SystemColors.Window;
+
             UpdateTitleBar();
         }
 
