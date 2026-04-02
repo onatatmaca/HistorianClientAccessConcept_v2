@@ -335,22 +335,24 @@ namespace HistorianSyncTool.Forms
             if (!_connections.IsPrimaryConnected) { SetStatus("Primary not connected.", true); return; }
             if (string.IsNullOrWhiteSpace(cboPrimary.Text)) { SetStatus("Select a primary tag.", true); return; }
 
+            DateTime from = dtpStart.Value;
+            DateTime to   = dtpEnd.Value;
+            if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+
             SetBusy(true);
             SetStatus("Reading primary data…");
 
             try
             {
                 _cts = new CancellationTokenSource();
-                var tag   = cboPrimary.Text;
-                var from  = DateTime.Now.AddMinutes(-10);
-                var to    = DateTime.Now;
+                var tag = cboPrimary.Text;
 
                 var samples = await Task.Run(
-                    () => _data.ReadInterpolated(_connections.Primary, tag, from, to, 10),
+                    () => _data.ReadRawInRange(_connections.Primary, tag, from, to),
                     _cts.Token);
 
                 gridPrimary.DataSource = BuildSampleTable(samples);
-                SetStatus($"Primary: {samples.Count} samples read for '{tag}'.");
+                SetStatus($"Primary: {samples.Count} raw samples read for '{tag}'.");
             }
             catch (OperationCanceledException) { SetStatus("Read cancelled."); }
             catch (Exception ex) { SetStatus($"Read failed: {ex.Message}", true); }
@@ -362,22 +364,24 @@ namespace HistorianSyncTool.Forms
             if (!_connections.IsSecondaryConnected) { SetStatus("Secondary not connected.", true); return; }
             if (string.IsNullOrWhiteSpace(cboSecondary.Text)) { SetStatus("Select a secondary tag.", true); return; }
 
+            DateTime from = dtpStart.Value;
+            DateTime to   = dtpEnd.Value;
+            if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+
             SetBusy(true);
             SetStatus("Reading secondary data…");
 
             try
             {
                 _cts = new CancellationTokenSource();
-                var tag   = cboSecondary.Text;
-                var from  = DateTime.Now.AddMinutes(-10);
-                var to    = DateTime.Now;
+                var tag = cboSecondary.Text;
 
                 var samples = await Task.Run(
-                    () => _data.ReadInterpolated(_connections.Secondary, tag, from, to, 10),
+                    () => _data.ReadRawInRange(_connections.Secondary, tag, from, to),
                     _cts.Token);
 
                 gridSecondary.DataSource = BuildSampleTable(samples);
-                SetStatus($"Secondary: {samples.Count} samples read for '{tag}'.");
+                SetStatus($"Secondary: {samples.Count} raw samples read for '{tag}'.");
             }
             catch (OperationCanceledException) { SetStatus("Read cancelled."); }
             catch (Exception ex) { SetStatus($"Read failed: {ex.Message}", true); }
