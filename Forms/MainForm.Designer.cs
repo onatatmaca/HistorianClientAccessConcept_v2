@@ -68,6 +68,7 @@ namespace HistorianSyncTool.Forms
         // Right panel
         private Panel          pnlRight;
         private Panel          pnlRightContent;
+        private Panel          pnlRightBottom;
         private SectionHeader  hdrGapAnalysis;
         private Label          lblPrimaryGap;
         private CoverageBar    barPrimary;
@@ -402,11 +403,23 @@ namespace HistorianSyncTool.Forms
             };
             SetupGapGrid();
 
+            // Bottom action bar — Dock=Bottom so it always sits at the panel's lower edge
+            // regardless of form height at construction time.
+            pnlRightBottom = new Panel
+            {
+                Dock      = DockStyle.Bottom,
+                Height    = AppTheme.ButtonHeight * 2 + 14,   // stop + backfill + padding
+                BackColor = AppTheme.Surface,
+                Padding   = new Padding(rpad, 4, rpad, 6)
+            };
+            pnlRightBottom.Paint += (s, e) =>
+                e.Graphics.DrawLine(new Pen(AppTheme.Border), 0, 0, pnlRightBottom.Width, 0);
+
             btnBackfillPreview = new FlatButton
             {
-                Text   = "Preview & Backfill…",
-                Left   = rpad, Width = rlw,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+                Text  = "Preview & Backfill…",
+                Left  = rpad, Top = AppTheme.ButtonHeight + 8,
+                Width = rlw
             };
             btnBackfillPreview.Click += btnBackfillPreview_Click;
 
@@ -414,24 +427,24 @@ namespace HistorianSyncTool.Forms
             {
                 Text        = "■  Stop",
                 ButtonStyle = FlatButtonStyle.Danger,
-                Left        = rpad, Width = rlw,
-                Visible     = false,
-                Anchor      = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+                Left        = rpad, Top = 4,
+                Width       = rlw,
+                Visible     = false
             };
             btnStop.Click += btnStop_Click;
 
-            btnBackfillPreview.Top = pnlRight.Height - btnBackfillPreview.Height - 48;
-            btnStop.Top            = btnBackfillPreview.Top - btnStop.Height - 6;
+            pnlRightBottom.Controls.Add(btnStop);
+            pnlRightBottom.Controls.Add(btnBackfillPreview);
 
             pnlRightContent.Controls.AddRange(new Control[]
             {
                 hdrGapAnalysis,
                 lblPrimaryGap,   barPrimary,
                 lblSecondaryGap, barSecondary,
-                lblGapSummary,   gridGaps,
-                btnStop,         btnBackfillPreview
+                lblGapSummary,   gridGaps
             });
-            pnlRight.Controls.Add(pnlRightContent);
+            pnlRight.Controls.Add(pnlRightBottom);    // Bottom — added before Fill
+            pnlRight.Controls.Add(pnlRightContent);   // Fill
 
             // ══════════════════════════════════════════════════════════════════════
             // CENTER PANEL  (Dock=Fill)
@@ -648,10 +661,11 @@ namespace HistorianSyncTool.Forms
             gridFieldDefs = new System.Windows.Forms.DataGridView
             {
                 Left = 0, Top = txtTypeName.Bottom + 6, Width = 340, Height = 70,
-                AllowUserToAddRows = false
+                AllowUserToAddRows = false,
+                AutoGenerateColumns = false          // prevent DataTable from creating duplicate columns
             };
-            gridFieldDefs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Field Name", Name = "FieldName", FillWeight = 60 });
-            gridFieldDefs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Data Type",  Name = "DataType",  FillWeight = 40 });
+            gridFieldDefs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Field Name", Name = "FieldName", DataPropertyName = "FieldName", FillWeight = 60 });
+            gridFieldDefs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Data Type",  Name = "DataType",  DataPropertyName = "DataType",  FillWeight = 40 });
             var mfTable = new System.Data.DataTable();
             mfTable.Columns.Add("FieldName");
             mfTable.Columns.Add("DataType");
