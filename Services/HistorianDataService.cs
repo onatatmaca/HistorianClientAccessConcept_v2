@@ -160,12 +160,16 @@ namespace HistorianSyncTool.Services
             return Retry(() =>
             {
                 Proficy.Historian.ClientAccess.API.DataSet set = new Proficy.Historian.ClientAccess.API.DataSet();
-                set[tagName] = new DataSamples<float>
+                var samples = new DataSamples<float>
                 {
                     Times = times,
-                    Values = values,
-                    Qualities = qualities
+                    Values = values
                 };
+                var qualDict = new Dictionary<int, DataQuality>();
+                for (int i = 0; i < qualities.Length; i++)
+                    qualDict[i] = qualities[i];
+                samples.Qualities = qualDict;
+                set[tagName] = samples;
                 ItemErrors errors;
                 conn.IData.Add(set, false, out errors);
 
