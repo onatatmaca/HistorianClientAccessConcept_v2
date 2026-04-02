@@ -602,11 +602,12 @@ namespace HistorianSyncTool.Forms
         {
             AppTheme.StyleGrid(gridGaps);
             gridGaps.ReadOnly = true;
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Start",        Name = "Start",    FillWeight = 25 });
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "End",          Name = "End",      FillWeight = 25 });
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Duration",     Name = "Duration", FillWeight = 20 });
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Batches",      Name = "Batches",  FillWeight = 15 });
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Backfillable", Name = "Backfill", FillWeight = 15 });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Server",       Name = "Server",   FillWeight = 12 });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Start",        Name = "Start",    FillWeight = 24 });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "End",          Name = "End",      FillWeight = 24 });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Duration",     Name = "Duration", FillWeight = 18 });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Batches",      Name = "Batches",  FillWeight = 11 });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Backfillable", Name = "Backfill", FillWeight = 11 });
         }
 
         // ══════════════════════════════════════════════════════════════════════════

@@ -1,9 +1,12 @@
+using HistorianSyncTool.Models;
 using HistorianSyncTool.Properties;
 using HistorianSyncTool.Services;
 using HistorianSyncTool.UI;
 using HistorianSyncTool.UI.Controls;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -15,6 +18,10 @@ namespace HistorianSyncTool.Forms
         private readonly HistorianConnectionService _connections = new HistorianConnectionService();
         private readonly HistorianDataService       _data        = new HistorianDataService();
         private readonly GapAnalysisService         _gapAnalysis = new GapAnalysisService();
+
+        // ── Gap Analysis state ─────────────────────────────────────────────────────
+        private GapAnalysisResult _lastPrimaryResult;
+        private GapAnalysisResult _lastSecondaryResult;
 
         // ── Cancellation ───────────────────────────────────────────────────────────
         private CancellationTokenSource _cts;
@@ -250,9 +257,41 @@ namespace HistorianSyncTool.Forms
         }
 
         // ── Get Stats ──────────────────────────────────────────────────────────────
-        private void btnGetStats_Click(object sender, EventArgs e)
+        private async void btnGetStats_Click(object sender, EventArgs e)
         {
-            Log("Server stats: coming soon.");
+            if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected)
+            { SetStatus("Connect to a server first.", true); return; }
+
+            SetBusy(true);
+            SetStatus("Fetching server stats…");
+            string mask = string.IsNullOrWhiteSpace(txtTagnameFilter.Text) ? "*" : txtTagnameFilter.Text.Trim();
+
+            try
+            {
+                _cts = new CancellationTokenSource();
+                var token = _cts.Token;
+                int priCount = 0, secCount = 0;
+
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (_connections.IsPrimaryConnected)
+                        priCount = _data.BrowseTags(_connections.Primary, mask).Count;
+                    token.ThrowIfCancellationRequested();
+                    if (_connections.IsSecondaryConnected)
+                        secCount = _data.BrowseTags(_connections.Secondary, mask).Count;
+                }, token);
+
+                if (_connections.IsPrimaryConnected)
+                    Log($"Primary  ({txtPrimary.Text.Trim()}): {priCount} float tag(s) matching '{mask}'");
+                if (_connections.IsSecondaryConnected)
+                    Log($"Secondary ({txtSecondary.Text.Trim()}): {secCount} float tag(s) matching '{mask}'");
+
+                SetStatus("Server stats loaded — see Activity Log.");
+            }
+            catch (OperationCanceledException) { SetStatus("Stats cancelled."); }
+            catch (Exception ex) { SetStatus($"Stats failed: {ex.Message}", true); }
+            finally { SetBusy(false); }
         }
 
         // ── Read Data ──────────────────────────────────────────────────────────────
@@ -331,9 +370,49 @@ namespace HistorianSyncTool.Forms
         }
 
         // ── Compare ────────────────────────────────────────────────────────────────
-        private void btnCompare_Click(object sender, EventArgs e)
+        private async void btnCompare_Click(object sender, EventArgs e)
         {
-            Log("Compare: coming soon.");
+            if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected)
+            { SetStatus("Connect to a server first.", true); return; }
+            if (string.IsNullOrWhiteSpace(cboPrimary.Text) && string.IsNullOrWhiteSpace(cboSecondary.Text))
+            { SetStatus("Browse and select tags first.", true); return; }
+
+            DateTime from = dtpStart.Value;
+            DateTime to   = dtpEnd.Value;
+            if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+
+            SetBusy(true);
+            SetStatus("Comparing tags over evaluation period…");
+
+            try
+            {
+                _cts = new CancellationTokenSource();
+                var token = _cts.Token;
+                const int sampleCount = 200;
+
+                List<(DateTime Time, float Value, double Quality)> priSamples = null;
+                List<(DateTime Time, float Value, double Quality)> secSamples = null;
+
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (_connections.IsPrimaryConnected && !string.IsNullOrWhiteSpace(cboPrimary.Text))
+                        priSamples = _data.ReadInterpolated(_connections.Primary, cboPrimary.Text, from, to, sampleCount);
+                    token.ThrowIfCancellationRequested();
+                    if (_connections.IsSecondaryConnected && !string.IsNullOrWhiteSpace(cboSecondary.Text))
+                        secSamples = _data.ReadInterpolated(_connections.Secondary, cboSecondary.Text, from, to, sampleCount);
+                }, token);
+
+                if (priSamples != null) gridPrimary.DataSource   = BuildSampleTable(priSamples);
+                if (secSamples != null) gridSecondary.DataSource = BuildSampleTable(secSamples);
+
+                int p = priSamples?.Count ?? 0;
+                int s = secSamples?.Count ?? 0;
+                SetStatus($"Compare: Primary {p} samples, Secondary {s} samples over evaluation period.");
+            }
+            catch (OperationCanceledException) { SetStatus("Compare cancelled."); }
+            catch (Exception ex) { SetStatus($"Compare failed: {ex.Message}", true); }
+            finally { SetBusy(false); }
         }
 
         private void btnCopyToPrimary_Click(object sender, EventArgs e)
@@ -347,14 +426,150 @@ namespace HistorianSyncTool.Forms
         }
 
         // ── Gap Analysis ───────────────────────────────────────────────────────────
-        private void btnAnalyzeGaps_Click(object sender, EventArgs e)
+        private async void btnAnalyzeGaps_Click(object sender, EventArgs e)
         {
-            Log("Gap analysis: coming soon.");
+            bool hasPrimary   = _connections.IsPrimaryConnected;
+            bool hasSecondary = _connections.IsSecondaryConnected;
+            if (!hasPrimary && !hasSecondary)
+            { SetStatus("Connect to at least one server first.", true); return; }
+
+            string tagName = radioHistSync.Checked
+                ? Settings.Default.SyncTagName
+                : cboPrimary.Text;
+
+            if (string.IsNullOrWhiteSpace(tagName))
+            { SetStatus("Select a tag (or switch to HistSync mode).", true); return; }
+
+            DateTime from = dtpStart.Value;
+            DateTime to   = dtpEnd.Value;
+            if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+
+            SetBusy(true);
+            SetStatus($"Analyzing gaps for '{tagName}'…");
+            _lastPrimaryResult   = null;
+            _lastSecondaryResult = null;
+
+            try
+            {
+                _cts = new CancellationTokenSource();
+                var token = _cts.Token;
+
+                List<DateTime> priTimes = null;
+                List<DateTime> secTimes = null;
+
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (hasPrimary)
+                    {
+                        var samples = _data.ReadRaw(_connections.Primary, tagName, from);
+                        priTimes = samples
+                            .Where(s => s.Time >= from && s.Time <= to)
+                            .Select(s => s.Time)
+                            .OrderBy(t => t)
+                            .ToList();
+                    }
+                    token.ThrowIfCancellationRequested();
+                    if (hasSecondary)
+                    {
+                        var samples = _data.ReadRaw(_connections.Secondary, tagName, from);
+                        secTimes = samples
+                            .Where(s => s.Time >= from && s.Time <= to)
+                            .Select(s => s.Time)
+                            .OrderBy(t => t)
+                            .ToList();
+                    }
+                }, token);
+
+                if (priTimes != null)
+                    _lastPrimaryResult = _gapAnalysis.Analyze(priTimes, txtPrimary.Text.Trim());
+                if (secTimes != null)
+                    _lastSecondaryResult = _gapAnalysis.Analyze(secTimes, txtSecondary.Text.Trim());
+
+                // Cross-server backfill feasibility
+                if (_lastPrimaryResult != null && secTimes != null)
+                    _gapAnalysis.MarkBackfillFeasibility(_lastPrimaryResult, secTimes);
+                if (_lastSecondaryResult != null && priTimes != null)
+                    _gapAnalysis.MarkBackfillFeasibility(_lastSecondaryResult, priTimes);
+
+                UpdateGapAnalysisUI(from, to);
+
+                int totalGaps = (_lastPrimaryResult?.Gaps.Count ?? 0)
+                              + (_lastSecondaryResult?.Gaps.Count ?? 0);
+                SetStatus($"Gap analysis complete — {totalGaps} gap(s) found.");
+            }
+            catch (OperationCanceledException) { SetStatus("Analysis cancelled."); }
+            catch (Exception ex) { SetStatus($"Analysis failed: {ex.Message}", true); }
+            finally { SetBusy(false); }
+        }
+
+        private void UpdateGapAnalysisUI(DateTime from, DateTime to)
+        {
+            // Coverage bars
+            if (_lastPrimaryResult != null && _lastPrimaryResult.HasData)
+                barPrimary.SetData(from, to, _lastPrimaryResult.Gaps, _lastPrimaryResult.CoverageRatio);
+            else
+                barPrimary.Clear();
+
+            if (_lastSecondaryResult != null && _lastSecondaryResult.HasData)
+                barSecondary.SetData(from, to, _lastSecondaryResult.Gaps, _lastSecondaryResult.CoverageRatio);
+            else
+                barSecondary.Clear();
+
+            // Gap detail grid
+            gridGaps.Rows.Clear();
+            PopulateGapGrid(_lastPrimaryResult,   "Primary");
+            PopulateGapGrid(_lastSecondaryResult, "Secondary");
+
+            // Summary label
+            int totalGaps = (_lastPrimaryResult?.Gaps.Count   ?? 0)
+                          + (_lastSecondaryResult?.Gaps.Count ?? 0);
+            if (totalGaps == 0)
+            {
+                lblGapSummary.Text      = "No gaps found — data appears complete.";
+                lblGapSummary.ForeColor = AppTheme.Success;
+            }
+            else
+            {
+                TimeSpan totalMissing =
+                    (_lastPrimaryResult?.TotalMissingDuration   ?? TimeSpan.Zero) +
+                    (_lastSecondaryResult?.TotalMissingDuration ?? TimeSpan.Zero);
+                lblGapSummary.Text      = $"{totalGaps} gap(s) — {FormatDuration(totalMissing)} missing total";
+                lblGapSummary.ForeColor = AppTheme.Danger;
+            }
+        }
+
+        private void PopulateGapGrid(GapAnalysisResult result, string serverLabel)
+        {
+            if (result == null || !result.HasGaps) return;
+            foreach (var gap in result.Gaps)
+            {
+                int backfillable = gap.Batches.Count(b => b.CanBackfill);
+                gridGaps.Rows.Add(
+                    serverLabel,
+                    gap.Start.ToString("yyyy-MM-dd HH:mm"),
+                    gap.End.ToString("yyyy-MM-dd HH:mm"),
+                    FormatDuration(gap.Duration),
+                    gap.Batches.Count,
+                    backfillable
+                );
+            }
+        }
+
+        private static string FormatDuration(TimeSpan ts)
+        {
+            if (ts.TotalDays >= 1)
+                return $"{(int)ts.TotalDays}d {ts.Hours}h {ts.Minutes}m";
+            if (ts.TotalHours >= 1)
+                return $"{(int)ts.TotalHours}h {ts.Minutes}m";
+            return $"{ts.Minutes}m {ts.Seconds}s";
         }
 
         private void btnBackfillPreview_Click(object sender, EventArgs e)
         {
-            Log("Backfill preview: coming soon.");
+            if (_lastPrimaryResult == null && _lastSecondaryResult == null)
+            { SetStatus("Run 'Analyze Gaps' first.", true); return; }
+            Log("Backfill preview: coming in next update.");
         }
 
         // ── Stop / Cancel ──────────────────────────────────────────────────────────
