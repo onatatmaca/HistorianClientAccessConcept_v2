@@ -20,6 +20,7 @@ namespace HistorianSyncTool.UI.Controls
 
         public ConnectionDot()
         {
+            SetStyle(ControlStyles.SupportsTransparentBackColor, true);
             Size            = new Size(14, 14);
             BackColor       = Color.Transparent;
             DoubleBuffered  = true;
