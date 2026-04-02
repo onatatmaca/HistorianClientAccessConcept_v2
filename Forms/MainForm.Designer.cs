@@ -92,13 +92,16 @@ namespace HistorianSyncTool.Forms
         private TabPage        tabMultiField;
         private TableLayoutPanel pnlGrids;
         private System.Windows.Forms.DataGridView gridPrimary;
+        private System.Windows.Forms.DataGridView gridSecondary;
         private Panel          pnlGridActions;
         private FlatButton     btnReadPrimary;
         private FlatButton     btnReadSecondary;
+        private Label          lblGridPrimaryTag;
+        private Label          lblGridSecondaryTag;
         private FlatButton     btnCompare;
         private FlatButton     btnCopyToPrimary;
         private FlatButton     btnCopyToSecondary;
-        private System.Windows.Forms.DataGridView gridSecondary;
+        private FlatButton     btnSyncScroll;
 
         // Write Data tab
         private Label          lblWriteTag;
@@ -519,18 +522,32 @@ namespace HistorianSyncTool.Forms
             pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  50f));
             pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 156)); // action column
             pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  50f));
-            pnlGrids.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));       // button row
+            pnlGrids.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));       // button + label row
             pnlGrids.RowStyles.Add(new RowStyle(SizeType.Percent,  100f));      // grid row
 
-            // Row 0 — Read buttons, each directly above its grid
-            var pnlReadLeft = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(0, 2, 4, 2) };
-            btnReadPrimary = new FlatButton { Text = "Read Primary", Dock = DockStyle.Fill };
+            // Row 0 — Read buttons + tag labels, each directly above its grid
+            var pnlReadLeft = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(0, 2, 4, 0) };
+            btnReadPrimary = new FlatButton { Text = "Read Primary", Dock = DockStyle.Top, Height = 30 };
             btnReadPrimary.Click += btnReadPrimary_Click;
+            lblGridPrimaryTag = new Label
+            {
+                Text = "", Dock = DockStyle.Bottom, Height = 20,
+                Font = AppTheme.SectionLabel, ForeColor = AppTheme.Navy,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            pnlReadLeft.Controls.Add(lblGridPrimaryTag);
             pnlReadLeft.Controls.Add(btnReadPrimary);
 
-            var pnlReadRight = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(4, 2, 0, 2) };
-            btnReadSecondary = new FlatButton { Text = "Read Secondary", Dock = DockStyle.Fill };
+            var pnlReadRight = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(4, 2, 0, 0) };
+            btnReadSecondary = new FlatButton { Text = "Read Secondary", Dock = DockStyle.Top, Height = 30 };
             btnReadSecondary.Click += btnReadSecondary_Click;
+            lblGridSecondaryTag = new Label
+            {
+                Text = "", Dock = DockStyle.Bottom, Height = 20,
+                Font = AppTheme.SectionLabel, ForeColor = AppTheme.Navy,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            pnlReadRight.Controls.Add(lblGridSecondaryTag);
             pnlReadRight.Controls.Add(btnReadSecondary);
 
             // Row 1 — Data grids with empty-state placeholder text
@@ -572,6 +589,10 @@ namespace HistorianSyncTool.Forms
             btnCopyToPrimary   = MakeCenterButton("← Copy to Primary", btnCompare.Bottom   + 8);
             btnCopyToSecondary = MakeCenterButton("Copy to Secondary →", btnCopyToPrimary.Bottom + 4);
 
+            btnSyncScroll = MakeCenterButton("Sync Scroll", btnCopyToSecondary.Bottom + 12);
+            btnSyncScroll.ButtonStyle = FlatButtonStyle.Secondary;
+            btnSyncScroll.Click += btnSyncScroll_Click;
+
             btnCompare.ButtonStyle         = FlatButtonStyle.Secondary;
             btnCopyToPrimary.ButtonStyle   = FlatButtonStyle.Warning;
             btnCopyToSecondary.ButtonStyle = FlatButtonStyle.Warning;
@@ -579,7 +600,7 @@ namespace HistorianSyncTool.Forms
             btnCopyToPrimary.Click     += btnCopyToPrimary_Click;
             btnCopyToSecondary.Click   += btnCopyToSecondary_Click;
             pnlGridActions.Controls.AddRange(new Control[]
-                { btnCompare, btnCopyToPrimary, btnCopyToSecondary });
+                { btnCompare, btnCopyToPrimary, btnCopyToSecondary, btnSyncScroll });
 
             // Spacer for middle cell in button row
             var spacer = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background };

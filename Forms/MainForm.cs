@@ -33,18 +33,48 @@ namespace HistorianSyncTool.Forms
         // ── Action buttons to disable during long ops ──────────────────────────────
         private List<Control> _actionButtons;
 
+        // ── Virtual mode backing data ──────────────────────────────────────────────
+        private List<GridRow> _primaryRows   = new List<GridRow>();
+        private List<GridRow> _secondaryRows = new List<GridRow>();
+
+        // ── Compare state ──────────────────────────────────────────────────────────
+        private bool _isCompareMode;
+        private List<(DateTime Time, float Value, double Quality)> _rawPrimarySamples;
+        private List<(DateTime Time, float Value, double Quality)> _rawSecondarySamples;
+
+        // ── Scroll sync ────────────────────────────────────────────────────────────
+        private bool _scrollSyncEnabled;
+        private bool _isSyncing;
+
+        // ── GridRow model ──────────────────────────────────────────────────────────
+        private class GridRow
+        {
+            public DateTime RawTime;
+            public string Timestamp;
+            public string Value;
+            public string Quality;
+            public bool IsSpacer;
+            public bool IsExtra;
+            public bool IsMismatch;
+        }
+
+        // ── Colors ─────────────────────────────────────────────────────────────────
+        private static readonly Color ColorSpacer   = Color.FromArgb(245, 245, 245);
+        private static readonly Color ColorExtra    = Color.FromArgb(232, 255, 232);
+        private static readonly Color ColorMismatch = Color.FromArgb(255, 248, 220);
+
         // ── Constructor ────────────────────────────────────────────────────────────
         public MainForm()
         {
             InitializeComponent();
 
-            // Read retry config
             int maxRetries;
             string retryStr = ConfigurationManager.AppSettings["MaxRetryAttempts"];
             maxRetries = int.TryParse(retryStr, out maxRetries) ? maxRetries : 3;
             _data = new HistorianDataService(maxRetries);
 
             ApplyTheme();
+            SetupVirtualMode();
             LoadSettings();
             UpdateConnectionStatus();
             UpdateTitleBar();
@@ -67,6 +97,143 @@ namespace HistorianSyncTool.Forms
             AppTheme.StyleGrid(gridFieldDefs);
         }
 
+        private void SetupVirtualMode()
+        {
+            // Primary grid
+            gridPrimary.VirtualMode = true;
+            gridPrimary.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Timestamp", Name = "Timestamp", FillWeight = 40 });
+            gridPrimary.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Value",     Name = "Value",     FillWeight = 35 });
+            gridPrimary.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Quality",   Name = "Quality",   FillWeight = 25 });
+            gridPrimary.CellValueNeeded += gridPrimary_CellValueNeeded;
+            gridPrimary.RowPrePaint     += grid_RowPrePaint;
+            gridPrimary.Scroll          += gridPrimary_Scroll;
+            gridPrimary.SelectionChanged += gridPrimary_SelectionChanged;
+            gridPrimary.ReadOnly = true;
+            gridPrimary.AllowUserToAddRows = false;
+            gridPrimary.AutoGenerateColumns = false;
+
+            // Secondary grid
+            gridSecondary.VirtualMode = true;
+            gridSecondary.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Timestamp", Name = "Timestamp", FillWeight = 40 });
+            gridSecondary.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Value",     Name = "Value",     FillWeight = 35 });
+            gridSecondary.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Quality",   Name = "Quality",   FillWeight = 25 });
+            gridSecondary.CellValueNeeded += gridSecondary_CellValueNeeded;
+            gridSecondary.RowPrePaint     += grid_RowPrePaint;
+            gridSecondary.Scroll          += gridSecondary_Scroll;
+            gridSecondary.SelectionChanged += gridSecondary_SelectionChanged;
+            gridSecondary.ReadOnly = true;
+            gridSecondary.AllowUserToAddRows = false;
+            gridSecondary.AutoGenerateColumns = false;
+        }
+
+        // ── Virtual mode events ────────────────────────────────────────────────────
+        private void gridPrimary_CellValueNeeded(object sender, DataGridViewCellValueEventArgs e)
+        {
+            if (e.RowIndex >= _primaryRows.Count) return;
+            var row = _primaryRows[e.RowIndex];
+            switch (e.ColumnIndex)
+            {
+                case 0: e.Value = row.Timestamp; break;
+                case 1: e.Value = row.Value;     break;
+                case 2: e.Value = row.Quality;   break;
+            }
+        }
+
+        private void gridSecondary_CellValueNeeded(object sender, DataGridViewCellValueEventArgs e)
+        {
+            if (e.RowIndex >= _secondaryRows.Count) return;
+            var row = _secondaryRows[e.RowIndex];
+            switch (e.ColumnIndex)
+            {
+                case 0: e.Value = row.Timestamp; break;
+                case 1: e.Value = row.Value;     break;
+                case 2: e.Value = row.Quality;   break;
+            }
+        }
+
+        private void grid_RowPrePaint(object sender, DataGridViewRowPrePaintEventArgs e)
+        {
+            var grid = (DataGridView)sender;
+            var rows = grid == gridPrimary ? _primaryRows : _secondaryRows;
+            if (e.RowIndex >= rows.Count) return;
+            var row = rows[e.RowIndex];
+
+            Color bg;
+            if (row.IsSpacer)        bg = ColorSpacer;
+            else if (row.IsExtra)    bg = ColorExtra;
+            else if (row.IsMismatch) bg = ColorMismatch;
+            else return;
+
+            grid.Rows[e.RowIndex].DefaultCellStyle.BackColor = bg;
+            if (row.IsSpacer)
+                grid.Rows[e.RowIndex].DefaultCellStyle.ForeColor = AppTheme.TextSecondary;
+        }
+
+        private void UpdateGridRowCount(DataGridView grid, int count)
+        {
+            grid.RowCount = 0;
+            grid.RowCount = count;
+            grid.Invalidate();
+        }
+
+        // ── Scroll sync ────────────────────────────────────────────────────────────
+        private void gridPrimary_Scroll(object sender, ScrollEventArgs e)
+        {
+            if (!_scrollSyncEnabled || _isSyncing) return;
+            _isSyncing = true;
+            try
+            {
+                if (gridPrimary.FirstDisplayedScrollingRowIndex >= 0 && gridSecondary.RowCount > 0)
+                    gridSecondary.FirstDisplayedScrollingRowIndex =
+                        Math.Min(gridPrimary.FirstDisplayedScrollingRowIndex, gridSecondary.RowCount - 1);
+            }
+            finally { _isSyncing = false; }
+        }
+
+        private void gridSecondary_Scroll(object sender, ScrollEventArgs e)
+        {
+            if (!_scrollSyncEnabled || _isSyncing) return;
+            _isSyncing = true;
+            try
+            {
+                if (gridSecondary.FirstDisplayedScrollingRowIndex >= 0 && gridPrimary.RowCount > 0)
+                    gridPrimary.FirstDisplayedScrollingRowIndex =
+                        Math.Min(gridSecondary.FirstDisplayedScrollingRowIndex, gridPrimary.RowCount - 1);
+            }
+            finally { _isSyncing = false; }
+        }
+
+        private void gridPrimary_SelectionChanged(object sender, EventArgs e)
+        {
+            if (!_scrollSyncEnabled || _isSyncing) return;
+            _isSyncing = true;
+            try
+            {
+                if (gridPrimary.CurrentRow != null && gridSecondary.RowCount > gridPrimary.CurrentRow.Index)
+                    gridSecondary.CurrentCell = gridSecondary[0, gridPrimary.CurrentRow.Index];
+            }
+            finally { _isSyncing = false; }
+        }
+
+        private void gridSecondary_SelectionChanged(object sender, EventArgs e)
+        {
+            if (!_scrollSyncEnabled || _isSyncing) return;
+            _isSyncing = true;
+            try
+            {
+                if (gridSecondary.CurrentRow != null && gridPrimary.RowCount > gridSecondary.CurrentRow.Index)
+                    gridPrimary.CurrentCell = gridPrimary[0, gridSecondary.CurrentRow.Index];
+            }
+            finally { _isSyncing = false; }
+        }
+
+        private void btnSyncScroll_Click(object sender, EventArgs e)
+        {
+            _scrollSyncEnabled = !_scrollSyncEnabled;
+            btnSyncScroll.Text = _scrollSyncEnabled ? "Unsync" : "Sync Scroll";
+        }
+
+        // ── Settings ───────────────────────────────────────────────────────────────
         private void LoadSettings()
         {
             var s = Settings.Default;
@@ -133,7 +300,6 @@ namespace HistorianSyncTool.Forms
             progressOp.Style    = busy ? ProgressBarStyle.Marquee : ProgressBarStyle.Blocks;
             if (!busy) { progressOp.Style = ProgressBarStyle.Blocks; progressOp.Value = 0; }
 
-            // Disable/enable action buttons to prevent re-entrancy
             foreach (var btn in _actionButtons)
                 btn.Enabled = !busy;
         }
@@ -171,7 +337,6 @@ namespace HistorianSyncTool.Forms
             txtSecondary.BackColor       = sec ? Color.FromArgb(240, 255, 245) : SystemColors.Window;
 
             dotStatus.State = (pri || sec) ? ConnectionState.Connected : ConnectionState.Disconnected;
-
             UpdateTitleBar();
         }
 
@@ -202,6 +367,157 @@ namespace HistorianSyncTool.Forms
             _cts?.Cancel();
             SetBusy(false);
             SetStatus("Operation cancelled.");
+        }
+
+        // ── Grid data helpers ──────────────────────────────────────────────────────
+        private List<GridRow> SamplesToGridRows(List<(DateTime Time, float Value, double Quality)> samples)
+        {
+            return samples.Select(s => new GridRow
+            {
+                RawTime   = s.Time,
+                Timestamp = s.Time.ToString("yyyy-MM-dd HH:mm:ss"),
+                Value     = s.Value.ToString("G6"),
+                Quality   = $"{s.Quality:F1}%"
+            }).ToList();
+        }
+
+        private void ExitCompareMode()
+        {
+            if (!_isCompareMode) return;
+            _isCompareMode = false;
+            btnCompare.Text = "Compare";
+        }
+
+        // ── Alignment algorithm ────────────────────────────────────────────────────
+        private void AlignGridData(
+            List<(DateTime Time, float Value, double Quality)> priSamples,
+            List<(DateTime Time, float Value, double Quality)> secSamples)
+        {
+            var priAligned = new List<GridRow>();
+            var secAligned = new List<GridRow>();
+
+            // Compute tolerance from median interval of the larger set
+            var larger = priSamples.Count >= secSamples.Count ? priSamples : secSamples;
+            TimeSpan tolerance = TimeSpan.Zero;
+            if (larger.Count >= 2)
+            {
+                var deltas = new List<long>();
+                for (int k = 1; k < larger.Count; k++)
+                    deltas.Add((larger[k].Time - larger[k - 1].Time).Ticks);
+                deltas.Sort();
+                long medianTicks = deltas[deltas.Count / 2];
+                tolerance = TimeSpan.FromTicks(medianTicks / 2);
+            }
+            if (tolerance.Ticks <= 0)
+                tolerance = TimeSpan.FromSeconds(5);
+
+            int i = 0, j = 0;
+            while (i < priSamples.Count && j < secSamples.Count)
+            {
+                var pTime = priSamples[i].Time;
+                var sTime = secSamples[j].Time;
+                TimeSpan diff = pTime - sTime;
+
+                if (diff.Duration() <= tolerance)
+                {
+                    // Matched
+                    bool mismatch = Math.Abs(priSamples[i].Value - secSamples[j].Value) > 0.001f;
+                    priAligned.Add(new GridRow
+                    {
+                        RawTime   = pTime,
+                        Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                        Value     = priSamples[i].Value.ToString("G6"),
+                        Quality   = $"{priSamples[i].Quality:F1}%",
+                        IsMismatch = mismatch
+                    });
+                    secAligned.Add(new GridRow
+                    {
+                        RawTime   = sTime,
+                        Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                        Value     = secSamples[j].Value.ToString("G6"),
+                        Quality   = $"{secSamples[j].Quality:F1}%",
+                        IsMismatch = mismatch
+                    });
+                    i++; j++;
+                }
+                else if (pTime < sTime)
+                {
+                    // Primary-only
+                    priAligned.Add(new GridRow
+                    {
+                        RawTime   = pTime,
+                        Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                        Value     = priSamples[i].Value.ToString("G6"),
+                        Quality   = $"{priSamples[i].Quality:F1}%",
+                        IsExtra   = true
+                    });
+                    secAligned.Add(new GridRow
+                    {
+                        RawTime   = pTime,
+                        Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                        IsSpacer  = true
+                    });
+                    i++;
+                }
+                else
+                {
+                    // Secondary-only
+                    priAligned.Add(new GridRow
+                    {
+                        RawTime   = sTime,
+                        Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                        IsSpacer  = true
+                    });
+                    secAligned.Add(new GridRow
+                    {
+                        RawTime   = sTime,
+                        Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                        Value     = secSamples[j].Value.ToString("G6"),
+                        Quality   = $"{secSamples[j].Quality:F1}%",
+                        IsExtra   = true
+                    });
+                    j++;
+                }
+            }
+
+            // Remaining primary
+            while (i < priSamples.Count)
+            {
+                var pTime = priSamples[i].Time;
+                priAligned.Add(new GridRow
+                {
+                    RawTime = pTime, Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                    Value = priSamples[i].Value.ToString("G6"), Quality = $"{priSamples[i].Quality:F1}%",
+                    IsExtra = true
+                });
+                secAligned.Add(new GridRow
+                {
+                    RawTime = pTime, Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                    IsSpacer = true
+                });
+                i++;
+            }
+
+            // Remaining secondary
+            while (j < secSamples.Count)
+            {
+                var sTime = secSamples[j].Time;
+                priAligned.Add(new GridRow
+                {
+                    RawTime = sTime, Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                    IsSpacer = true
+                });
+                secAligned.Add(new GridRow
+                {
+                    RawTime = sTime, Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                    Value = secSamples[j].Value.ToString("G6"), Quality = $"{secSamples[j].Quality:F1}%",
+                    IsExtra = true
+                });
+                j++;
+            }
+
+            _primaryRows   = priAligned;
+            _secondaryRows = secAligned;
         }
 
         // ── Connection ─────────────────────────────────────────────────────────────
@@ -250,6 +566,8 @@ namespace HistorianSyncTool.Forms
             SetBusy(true);
             SetStatus("Browsing tags…");
             string mask = string.IsNullOrWhiteSpace(txtTagnameFilter.Text) ? "*" : txtTagnameFilter.Text.Trim();
+            bool priConn = _connections.IsPrimaryConnected;
+            bool secConn = _connections.IsSecondaryConnected;
 
             try
             {
@@ -262,10 +580,10 @@ namespace HistorianSyncTool.Forms
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    if (_connections.IsPrimaryConnected)
+                    if (priConn)
                         priTags = _data.BrowseTags(_connections.Primary, mask).ToArray();
                     token.ThrowIfCancellationRequested();
-                    if (_connections.IsSecondaryConnected)
+                    if (secConn)
                         secTags = _data.BrowseTags(_connections.Secondary, mask).ToArray();
                 }, token);
 
@@ -300,6 +618,10 @@ namespace HistorianSyncTool.Forms
             SetBusy(true);
             SetStatus("Fetching server stats…");
             string mask = string.IsNullOrWhiteSpace(txtTagnameFilter.Text) ? "*" : txtTagnameFilter.Text.Trim();
+            string priHost = txtPrimary.Text.Trim();
+            string secHost = txtSecondary.Text.Trim();
+            bool priConn = _connections.IsPrimaryConnected;
+            bool secConn = _connections.IsSecondaryConnected;
 
             try
             {
@@ -310,17 +632,17 @@ namespace HistorianSyncTool.Forms
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    if (_connections.IsPrimaryConnected)
+                    if (priConn)
                         priCount = _data.BrowseTags(_connections.Primary, mask).Count;
                     token.ThrowIfCancellationRequested();
-                    if (_connections.IsSecondaryConnected)
+                    if (secConn)
                         secCount = _data.BrowseTags(_connections.Secondary, mask).Count;
                 }, token);
 
-                if (_connections.IsPrimaryConnected)
-                    Log($"Primary  ({txtPrimary.Text.Trim()}): {priCount} float tag(s) matching '{mask}'");
-                if (_connections.IsSecondaryConnected)
-                    Log($"Secondary ({txtSecondary.Text.Trim()}): {secCount} float tag(s) matching '{mask}'");
+                if (priConn)
+                    Log($"Primary  ({priHost}): {priCount} float tag(s) matching '{mask}'");
+                if (secConn)
+                    Log($"Secondary ({secHost}): {secCount} float tag(s) matching '{mask}'");
 
                 SetStatus("Server stats loaded — see Activity Log.");
             }
@@ -339,19 +661,24 @@ namespace HistorianSyncTool.Forms
             DateTime to   = dtpEnd.Value;
             if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
 
+            string tag     = cboPrimary.Text;
+            string priHost = txtPrimary.Text.Trim();
+
             SetBusy(true);
             SetStatus("Reading primary data…");
+            ExitCompareMode();
 
             try
             {
                 _cts = new CancellationTokenSource();
-                var tag = cboPrimary.Text;
-
                 var samples = await Task.Run(
                     () => _data.ReadRawInRange(_connections.Primary, tag, from, to),
                     _cts.Token);
 
-                gridPrimary.DataSource = BuildSampleTable(samples);
+                _rawPrimarySamples = samples;
+                _primaryRows = SamplesToGridRows(samples);
+                UpdateGridRowCount(gridPrimary, _primaryRows.Count);
+                lblGridPrimaryTag.Text = $"{priHost} — {tag}";
                 SetStatus($"Primary: {samples.Count} raw samples read for '{tag}'.");
             }
             catch (OperationCanceledException) { SetStatus("Read cancelled."); }
@@ -368,19 +695,24 @@ namespace HistorianSyncTool.Forms
             DateTime to   = dtpEnd.Value;
             if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
 
+            string tag     = cboSecondary.Text;
+            string secHost = txtSecondary.Text.Trim();
+
             SetBusy(true);
             SetStatus("Reading secondary data…");
+            ExitCompareMode();
 
             try
             {
                 _cts = new CancellationTokenSource();
-                var tag = cboSecondary.Text;
-
                 var samples = await Task.Run(
                     () => _data.ReadRawInRange(_connections.Secondary, tag, from, to),
                     _cts.Token);
 
-                gridSecondary.DataSource = BuildSampleTable(samples);
+                _rawSecondarySamples = samples;
+                _secondaryRows = SamplesToGridRows(samples);
+                UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
+                lblGridSecondaryTag.Text = $"{secHost} — {tag}";
                 SetStatus($"Secondary: {samples.Count} raw samples read for '{tag}'.");
             }
             catch (OperationCanceledException) { SetStatus("Read cancelled."); }
@@ -388,44 +720,51 @@ namespace HistorianSyncTool.Forms
             finally { SetBusy(false); }
         }
 
-        private System.Data.DataTable BuildSampleTable(
-            List<(DateTime Time, float Value, double Quality)> samples)
-        {
-            var dt = new System.Data.DataTable();
-            dt.Columns.Add("Timestamp", typeof(string));
-            dt.Columns.Add("Value",     typeof(string));
-            dt.Columns.Add("Quality",   typeof(string));
-            foreach (var s in samples)
-            {
-                var row = dt.NewRow();
-                row["Timestamp"] = s.Time.ToString("yyyy-MM-dd HH:mm:ss");
-                row["Value"]     = s.Value.ToString("G6");
-                row["Quality"]   = $"{s.Quality:F1}%";
-                dt.Rows.Add(row);
-            }
-            return dt;
-        }
-
         // ── Compare ────────────────────────────────────────────────────────────────
         private async void btnCompare_Click(object sender, EventArgs e)
         {
-            if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected)
-            { SetStatus("Connect to a server first.", true); return; }
-            if (string.IsNullOrWhiteSpace(cboPrimary.Text) && string.IsNullOrWhiteSpace(cboSecondary.Text))
-            { SetStatus("Browse and select tags first.", true); return; }
+            // Toggle off
+            if (_isCompareMode)
+            {
+                _isCompareMode = false;
+                btnCompare.Text = "Compare";
+                if (_rawPrimarySamples != null)
+                {
+                    _primaryRows = SamplesToGridRows(_rawPrimarySamples);
+                    UpdateGridRowCount(gridPrimary, _primaryRows.Count);
+                }
+                if (_rawSecondarySamples != null)
+                {
+                    _secondaryRows = SamplesToGridRows(_rawSecondarySamples);
+                    UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
+                }
+                SetStatus("Switched to raw view.");
+                return;
+            }
+
+            // Need both servers
+            if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
+            { SetStatus("Connect to both servers first.", true); return; }
+
+            string priTag = cboPrimary.Text;
+            string secTag = cboSecondary.Text;
+            if (string.IsNullOrWhiteSpace(priTag) || string.IsNullOrWhiteSpace(secTag))
+            { SetStatus("Select tags on both servers first.", true); return; }
 
             DateTime from = dtpStart.Value;
             DateTime to   = dtpEnd.Value;
             if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
 
+            string priHost = txtPrimary.Text.Trim();
+            string secHost = txtSecondary.Text.Trim();
+
             SetBusy(true);
-            SetStatus("Comparing tags over evaluation period…");
+            SetStatus("Reading and comparing…");
 
             try
             {
                 _cts = new CancellationTokenSource();
                 var token = _cts.Token;
-                const int sampleCount = 200;
 
                 List<(DateTime Time, float Value, double Quality)> priSamples = null;
                 List<(DateTime Time, float Value, double Quality)> secSamples = null;
@@ -433,19 +772,32 @@ namespace HistorianSyncTool.Forms
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    if (_connections.IsPrimaryConnected && !string.IsNullOrWhiteSpace(cboPrimary.Text))
-                        priSamples = _data.ReadInterpolated(_connections.Primary, cboPrimary.Text, from, to, sampleCount);
+                    priSamples = _data.ReadRawInRange(_connections.Primary, priTag, from, to);
                     token.ThrowIfCancellationRequested();
-                    if (_connections.IsSecondaryConnected && !string.IsNullOrWhiteSpace(cboSecondary.Text))
-                        secSamples = _data.ReadInterpolated(_connections.Secondary, cboSecondary.Text, from, to, sampleCount);
+                    secSamples = _data.ReadRawInRange(_connections.Secondary, secTag, from, to);
                 }, token);
 
-                if (priSamples != null) gridPrimary.DataSource   = BuildSampleTable(priSamples);
-                if (secSamples != null) gridSecondary.DataSource = BuildSampleTable(secSamples);
+                _rawPrimarySamples   = priSamples;
+                _rawSecondarySamples = secSamples;
 
-                int p = priSamples?.Count ?? 0;
-                int s = secSamples?.Count ?? 0;
-                SetStatus($"Compare: Primary {p} samples, Secondary {s} samples over evaluation period.");
+                // Run alignment
+                AlignGridData(priSamples, secSamples);
+
+                UpdateGridRowCount(gridPrimary,   _primaryRows.Count);
+                UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
+
+                lblGridPrimaryTag.Text   = $"{priHost} — {priTag}";
+                lblGridSecondaryTag.Text = $"{secHost} — {secTag}";
+
+                _isCompareMode = true;
+                btnCompare.Text = "Raw View";
+
+                // Summary
+                int matched   = _primaryRows.Count(r => !r.IsSpacer && !r.IsExtra);
+                int priOnly   = _primaryRows.Count(r => r.IsExtra);
+                int secOnly   = _secondaryRows.Count(r => r.IsExtra);
+                int mismatches = _primaryRows.Count(r => r.IsMismatch);
+                SetStatus($"Compare: Pri {priSamples.Count} | Sec {secSamples.Count} | Matched {matched} | Pri-only {priOnly} | Sec-only {secOnly} | Mismatches {mismatches}");
             }
             catch (OperationCanceledException) { SetStatus("Compare cancelled."); }
             catch (Exception ex) { SetStatus($"Compare failed: {ex.Message}", true); }
@@ -478,7 +830,6 @@ namespace HistorianSyncTool.Forms
             if (_lastPrimaryResult == null && _lastSecondaryResult == null)
             { SetStatus("Run 'Analyze Gaps' first.", true); return; }
 
-            // Show preview summary
             int priGaps = _lastPrimaryResult?.Gaps.Count ?? 0;
             int secGaps = _lastSecondaryResult?.Gaps.Count ?? 0;
             int priBatches = _lastPrimaryResult?.Gaps.Sum(g => g.Batches.Count(b => b.CanBackfill)) ?? 0;
@@ -501,7 +852,6 @@ namespace HistorianSyncTool.Forms
 
             if (result != DialogResult.Yes) return;
 
-            // Backfill secondary gaps (source = primary)
             if (_lastSecondaryResult != null && _lastSecondaryResult.HasGaps
                 && _connections.IsPrimaryConnected && _connections.IsSecondaryConnected)
             {
@@ -509,7 +859,6 @@ namespace HistorianSyncTool.Forms
                     _connections.Secondary, "Primary", "Secondary");
             }
 
-            // Backfill primary gaps (source = secondary)
             if (_lastPrimaryResult != null && _lastPrimaryResult.HasGaps
                 && _connections.IsPrimaryConnected && _connections.IsSecondaryConnected)
             {
@@ -518,11 +867,6 @@ namespace HistorianSyncTool.Forms
             }
         }
 
-        /// <summary>
-        /// Core backfill engine: reads from source, writes to target, batch by batch.
-        /// sourceResult = the gap analysis of the TARGET (it has the gaps we need to fill).
-        /// sourceConn = server that HAS the data. targetConn = server MISSING the data.
-        /// </summary>
         private async Task ExecuteBackfill(
             GapAnalysisResult sourceResult,
             ServerConnection sourceConn,
@@ -548,7 +892,6 @@ namespace HistorianSyncTool.Forms
             if (string.IsNullOrWhiteSpace(tagName))
             { SetStatus("No tag selected for backfill.", true); return; }
 
-            // Count backfillable batches
             var allBatches = sourceResult.Gaps
                 .SelectMany(g => g.Batches)
                 .Where(b => b.CanBackfill)
@@ -596,7 +939,6 @@ namespace HistorianSyncTool.Forms
 
                         try
                         {
-                            // Read from source
                             var samples = _data.ReadRawInRange(sourceConn, tagName, batch.Start, batch.End);
 
                             if (samples.Count == 0)
@@ -605,7 +947,6 @@ namespace HistorianSyncTool.Forms
                                 continue;
                             }
 
-                            // Build arrays preserving quality
                             var times     = samples.Select(s => s.Time).ToArray();
                             var values    = samples.Select(s => s.Value).ToArray();
                             var qualities = samples.Select(s =>
@@ -613,7 +954,6 @@ namespace HistorianSyncTool.Forms
                                 s.Quality > 0      ? DataQuality.Uncertain :
                                                      DataQuality.Bad).ToArray();
 
-                            // Write to target
                             var errors = _data.WriteFloatSamplesWithQuality(targetConn, tagName, times, values, qualities);
                             batch.SamplesWritten = samples.Count;
 
@@ -629,14 +969,13 @@ namespace HistorianSyncTool.Forms
                                 report.SamplesWritten += samples.Count;
                             }
 
-                            // Read-after-write verification
                             var verify = _data.VerifyWrite(targetConn, tagName, batch.Start, batch.End, samples.Count);
                             batch.Verified = verify.Actual >= verify.Expected;
                             if (!batch.Verified)
                             {
-                                string msg = $"Batch {batchIndex}: verification mismatch — wrote {verify.Expected}, found {verify.Actual}";
-                                report.Errors.Add(msg);
-                                Invoke((Action)(() => Log($"  ⚠ {msg}")));
+                                string vmsg = $"Batch {batchIndex}: verification mismatch — wrote {verify.Expected}, found {verify.Actual}";
+                                report.Errors.Add(vmsg);
+                                Invoke((Action)(() => Log($"  Warning: {vmsg}")));
                             }
                         }
                         catch (Exception ex)
@@ -644,10 +983,8 @@ namespace HistorianSyncTool.Forms
                             report.BatchesFailed++;
                             report.Errors.Add($"Batch {batchIndex}: {ex.Message}");
                             Invoke((Action)(() => Log($"  Batch {batchIndex}/{totalBatches}: FAILED — {ex.Message}")));
-                            // Skip & continue
                         }
 
-                        // Update progress on UI thread
                         Invoke((Action)(() => SetProgress(batchIndex, totalBatches)));
                     }
                 }, token);
@@ -684,7 +1021,7 @@ namespace HistorianSyncTool.Forms
             {
                 Log($"  Errors ({report.Errors.Count}):");
                 foreach (var err in report.Errors)
-                    Log($"    • {err}");
+                    Log($"    - {err}");
             }
             Log("────────────────────────────────────────────────");
         }
@@ -750,7 +1087,6 @@ namespace HistorianSyncTool.Forms
                 if (secTimes != null)
                     _lastSecondaryResult = _gapAnalysis.Analyze(secTimes, txtSecondary.Text.Trim());
 
-                // Cross-server backfill feasibility
                 if (_lastPrimaryResult != null && secTimes != null)
                     _gapAnalysis.MarkBackfillFeasibility(_lastPrimaryResult, secTimes);
                 if (_lastSecondaryResult != null && priTimes != null)
@@ -907,7 +1243,7 @@ namespace HistorianSyncTool.Forms
             Log("Write MultiField: coming soon.");
         }
 
-        // ── Log panel toggle ───────────────────────────────────────────────────────
+        // ── Log panel ──────────────────────────────────────────────────────────────
         private void btnClearLog_Click(object sender, EventArgs e) => txtLog.Clear();
 
         private void btnCopyLog_Click(object sender, EventArgs e)
