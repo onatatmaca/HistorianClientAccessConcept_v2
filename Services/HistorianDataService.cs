@@ -1,6 +1,7 @@
 using Proficy.Historian.ClientAccess.API;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -152,33 +153,52 @@ namespace HistorianSyncTool.Services
             });
         }
 
-        /// <summary>Writes float samples preserving original quality per sample. Used for backfill.</summary>
+        /// <summary>
+        /// Writes float samples preserving original quality. Groups by quality level
+        /// and writes each group with ImplicitQuality set accordingly.
+        /// </summary>
         public List<string> WriteFloatSamplesWithQuality(
             ServerConnection conn, string tagName,
             DateTime[] times, float[] values, DataQuality[] qualities)
         {
-            return Retry(() =>
-            {
-                Proficy.Historian.ClientAccess.API.DataSet set = new Proficy.Historian.ClientAccess.API.DataSet();
-                var samples = new DataSamples<float>
-                {
-                    Times = times,
-                    Values = values
-                };
-                var qualDict = new Dictionary<int, DataQuality>();
-                for (int i = 0; i < qualities.Length; i++)
-                    qualDict[i] = qualities[i];
-                samples.Qualities = qualDict;
-                set[tagName] = samples;
-                ItemErrors errors;
-                conn.IData.Add(set, false, out errors);
+            var allMessages = new List<string>();
 
-                var messages = new List<string>();
-                if (errors != null)
-                    foreach (var kv in errors)
-                        messages.Add($"Tag {kv.Key}: {kv.Value}");
-                return messages;
-            });
+            // Group indices by quality so each write uses a single ImplicitQuality
+            var groups = new Dictionary<DataQuality, List<int>>();
+            for (int i = 0; i < qualities.Length; i++)
+            {
+                if (!groups.ContainsKey(qualities[i]))
+                    groups[qualities[i]] = new List<int>();
+                groups[qualities[i]].Add(i);
+            }
+
+            foreach (var grp in groups)
+            {
+                var msgs = Retry(() =>
+                {
+                    var grpTimes  = grp.Value.Select(i => times[i]).ToArray();
+                    var grpValues = grp.Value.Select(i => values[i]).ToArray();
+
+                    Proficy.Historian.ClientAccess.API.DataSet set = new Proficy.Historian.ClientAccess.API.DataSet();
+                    set[tagName] = new DataSamples<float>
+                    {
+                        Times = grpTimes,
+                        Values = grpValues,
+                        ImplicitQuality = grp.Key
+                    };
+                    ItemErrors errors;
+                    conn.IData.Add(set, false, out errors);
+
+                    var messages = new List<string>();
+                    if (errors != null)
+                        foreach (var kv in errors)
+                            messages.Add($"Tag {kv.Key}: {kv.Value}");
+                    return messages;
+                });
+                allMessages.AddRange(msgs);
+            }
+
+            return allMessages;
         }
 
         /// <summary>
