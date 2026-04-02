@@ -1,0 +1,16 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Packages
+packages/
+
+# Generated
+*.Designer.cs.bak
+
+# OS
+Thumbs.db
+Desktop.ini
