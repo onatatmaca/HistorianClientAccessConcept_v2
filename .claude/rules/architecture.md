@@ -59,13 +59,18 @@ dependencies so they can be unit tested independently.
 2. Align by timestamp into `SortedDictionary<DateTime, CompareRowData>`
 3. Missing side shown as `"missing"` in grid
 
-### Copy / Backfill
-1. Gap analysis must run first (populates `lastPrimaryHistSyncGap` / `lastSecondaryHistSyncGap`)
-2. `CopySamplesForHistSyncGaps` iterates gap windows → batches → reads source → writes target
-3. Only backfillable batches (`CanBackfill = true`) are written
-
-### HistSync Gap Analysis
-1. Check tag `HistSync` exists on both servers
+### HistSync Gap Analysis (always HistSync — no per-tag analysis)
+1. `RunGapAnalysis` always reads the `SyncTagName` (HistSync) on both servers
 2. `AnalyzeGaps` per server: compute median interval, detect gaps, split into 10-min batches
-3. Mark `CanBackfill` per batch by checking source server has data in that range
-4. Display coverage ratio and visual coverage bar
+3. Mark `CanBackfill` per batch by checking source server has HistSync data in that range
+4. Coverage bars always show HistSync coverage — not per-tag coverage
+5. Results stored in `_lastPrimaryResult` / `_lastSecondaryResult`
+
+### Multi-Tag Backfill
+1. Gap analysis must run first (HistSync windows define where data is missing)
+2. User clicks Copy button → `TagSelectionDialog` shows tags on BOTH servers
+3. `ExecuteBackfill` iterates: for each selected tag → for each gap batch → read source → write target
+4. Only backfillable batches (`CanBackfill = true`) are written
+5. Per-tag + overall progress shown in status bar
+6. `TagBackfillResult` tracks per-tag stats; `SyncRunReport` aggregates across tags
+7. After backfill → `AutoRefreshAfterBackfill` re-runs gap analysis and updates UI

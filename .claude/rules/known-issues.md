@@ -110,3 +110,42 @@ exponential backoff.
 
 **Fix in v2:** Wrap `HistorianDataService` methods in a retry helper (max 3 attempts,
 500ms / 1s / 2s backoff) for all `IData` and `ITags` calls.
+
+---
+
+## BUG: Per-Tag Gap Analysis Produces False Gaps on Bimodal Data (v2, fixed Phase 5)
+**Location:** Gap analysis when applied to non-HistSync tags
+
+Tags with bimodal sampling (e.g., pairs of samples 1s apart, then 15s between pairs) caused
+the median-based gap detection to pick up 1s as the interval. Every normal 15s pause was flagged
+as a gap (805+ false gaps), producing wildly wrong coverage (6%/1% instead of near-100%).
+
+**Fix:** Gap analysis now **always** uses HistSync (steady heartbeat). No per-tag gap analysis.
+Radio buttons removed. Coverage bars always show HistSync coverage.
+
+---
+
+## BUG: DateTimePicker Shows Arrows Instead of Calendar Dropdown (v2, fixed Phase 5)
+**Location:** `MakeDtp()` in `MainForm.Designer.cs`
+
+`ShowUpDown = true` caused DateTimePicker to show up/down arrows instead of a calendar popup.
+
+**Fix:** Changed to `ShowUpDown = false`.
+
+---
+
+## BUG: Gap Grid Duration Column Cut Off (v2, fixed Phase 5)
+**Location:** `SetupGapGrid()` in `MainForm.Designer.cs`
+
+The gap grid used `FillWeight` on columns but didn't have `AutoSizeColumnsMode = Fill`, so
+the Duration column was truncated on the right edge.
+
+**Fix:** Added `gridGaps.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill`.
+
+---
+
+## DESIGN: No UI Refresh After Backfill (v2, fixed Phase 5)
+After `ExecuteBackfill` completed, the gap analysis results, coverage bars, and data tables
+were not refreshed. The user had to manually re-run gap analysis to see updated coverage.
+
+**Fix:** Added `AutoRefreshAfterBackfill()` which calls `RunGapAnalysis` after every backfill.

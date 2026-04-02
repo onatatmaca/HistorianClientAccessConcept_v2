@@ -70,7 +70,23 @@ Make core logic testable without the UI or a live Historian instance.
 
 ---
 
-## Phase 5 — Scheduling (future)
+## Phase 5 — HistSync-as-Master & Multi-Tag Backfill
+Redesign gap analysis to always use HistSync and support multi-tag backfill.
+
+- [x] Remove radio buttons (HistSync vs Selected Tag) — always use HistSync
+- [x] Fix coverage values (bimodal data false gaps eliminated by HistSync-only analysis)
+- [x] Multi-tag backfill via `TagSelectionDialog` (CheckedListBox, shared tags only)
+- [x] Per-tag + overall progress display during backfill
+- [x] Auto-refresh gap analysis + coverage bars after backfill completes
+- [x] Extend `SyncRunReport` with per-tag `TagBackfillResult` tracking
+- [x] Fix DateTimePicker: calendar dropdown instead of up/down arrows
+- [x] Expand quick-select buttons: 8 presets (1h, 6h, 24h, 3d, 7d, 30d, 90d, 1y) in 4×2 grid
+- [x] Fix gap grid column overflow (`AutoSizeColumnsMode = Fill`)
+- [x] Cross-thread safety audit (all UI values captured before `Task.Run`)
+
+---
+
+## Phase 6 — Scheduling (future)
 - [ ] Settings page: enable/disable schedule, interval
 - [ ] Background timer runs gap analysis + backfill unattended
 - [ ] System tray icon (optional)
@@ -94,3 +110,9 @@ Make core logic testable without the UI or a live Historian instance.
 | SetBusy re-entrancy (buttons not disabled) | audit | Action buttons disabled during ops |
 | ReadRawInRange missing quality | audit | Now returns `(Time, Value, Quality)` tuple |
 | Unsorted input to GapAnalysisService | audit | Auto-sorts if needed |
+| Coverage wildly wrong on bimodal tags | 5 | HistSync-only gap analysis eliminates false gaps from irregular tag intervals |
+| Radio buttons confused gap analysis scope | 5 | Removed — always use HistSync |
+| DateTimePicker showed arrows not calendar | 5 | `ShowUpDown = false` |
+| Gap grid Duration column cut off | 5 | `AutoSizeColumnsMode = Fill` |
+| No UI refresh after backfill | 5 | `AutoRefreshAfterBackfill()` re-runs gap analysis |
+| Single-tag backfill too limiting | 5 | Multi-tag via `TagSelectionDialog` |

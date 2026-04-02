@@ -9,7 +9,8 @@ A special float tag named `HistSync` must exist on both servers. It acts as a he
 a collector writes to it at a regular interval. The gap analysis detects when that heartbeat
 stopped, which implies a data collection outage on that server.
 
-The tag name is currently hardcoded as `"HistSync"`. In v2 this should be configurable.
+The tag name is configurable via `app.config` (`SyncTagName` setting, default `"HistSync"`).
+Gap analysis **always** uses this tag — there is no per-tag gap analysis option.
 
 ## Domain Model
 
@@ -72,34 +73,40 @@ coverageRatio = (totalSpan - missingDuration) / totalSpan
 ```
 Displayed as a colored progress bar: red = missing, green = covered.
 
-## Backfill Execution: CopySamplesForHistSyncGaps
+## Backfill Execution: ExecuteBackfill (Multi-Tag)
 
 ```
-for each GapWindow in targetGapResult.Gaps:
-    for each GapBatch in window.Batches:
+for each tag in tagsToBackfill:          // user-selected via TagSelectionDialog
+    for each batch in gapResult.Batches: // from HistSync gap windows
         if batch.CanBackfill:
-            ReadFloatSamplesInRange(sourceConn, sourceTag, batch.Start, batch.End)
-            → write to targetConn via IData.Add(writeSet, false, out errors)
-            → log per-batch result
+            ReadRawInRange(sourceConn, tag, batch.Start, batch.End)
+            → WriteFloatSamplesWithQuality (preserves original quality)
+            → VerifyWrite (read-after-write check)
+            → track in TagBackfillResult
 ```
 
-`ReadFloatSamplesInRange` uses `RawByTimeQuery` from `batch.Start`, then filters returned
-samples to `[start, end)` in a loop, parsing each value with `float.TryParse`.
+Key design: HistSync defines WHERE gaps are. The user chooses WHICH tags to copy into those gaps.
+Tags with no source data in a gap window are silently skipped.
 
-**Important:** The copy currently writes with `ImplicitQuality = DataQuality.Good`. In v2,
-preserve the original quality from the source sample.
+## Tag Selection Dialog (`Forms/TagSelectionDialog.cs`)
+- Shows tags that exist on BOTH servers (intersection)
+- `CheckedListBox` with Select All / Select None buttons
+- Summary header shows gap count and backfillable batch count
+- Shown before every backfill operation (Copy to Primary, Copy to Secondary, Preview & Backfill)
 
 ## State Dependencies
-The Copy buttons depend on gap analysis having run first:
-- `On_cmdMoveToPrimary_Click` requires `lastPrimaryHistSyncGap != null`
-- `On_cmdMoveToSecondary_Click` requires `lastSecondaryHistSyncGap != null`
+The Copy/Backfill buttons depend on gap analysis having run first:
+- `_lastPrimaryResult` / `_lastSecondaryResult` must be non-null with gaps
+- Both servers must be connected for backfill
 
-If gap analysis has not run, the buttons abort early with an error message.
+After backfill → `AutoRefreshAfterBackfill` re-runs `RunGapAnalysis` and updates coverage bars.
 
-## v2 Improvements Needed
-- [ ] Make `HistSync` tag name configurable (not hardcoded)
-- [ ] Make batch size configurable (currently hardcoded 10 minutes)
-- [ ] Preserve original sample quality during backfill (do not force `DataQuality.Good`)
-- [ ] Add read-after-write verification (re-query target range after write, compare counts)
-- [ ] Add per-batch retry with exponential backoff on write failure
-- [ ] Surface a run-report summary (total gaps, batches attempted, batches succeeded, samples written)
+## v2 Improvements — All Complete
+- [x] HistSync tag name configurable (`SyncTagName` in app.config)
+- [x] Batch size configurable (`BatchSizeMinutes` in app.config, default 10)
+- [x] Original sample quality preserved (`WriteFloatSamplesWithQuality`)
+- [x] Read-after-write verification per batch
+- [x] Per-batch retry with exponential backoff (3 attempts)
+- [x] Run-report summary (`SyncRunReport` + per-tag `TagBackfillResult`)
+- [x] Multi-tag backfill via `TagSelectionDialog`
+- [x] Auto-refresh after backfill

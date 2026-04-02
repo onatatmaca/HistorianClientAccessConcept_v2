@@ -246,8 +246,7 @@ namespace HistorianSyncTool.Forms
             dtpEnd.Value = s.EndDate > DateTime.MinValue && s.EndDate > s.StartDate
                 ? s.EndDate : DateTime.Now;
 
-            radioHistSync.Checked      =  s.GapAnalysisOnHistSync;
-            radioSelectedTag.Checked   = !s.GapAnalysisOnHistSync;
+            // Gap analysis always uses HistSync — no radio buttons
         }
 
         private void SaveSettings()
@@ -258,7 +257,6 @@ namespace HistorianSyncTool.Forms
             s.TagnameFilter        = txtTagnameFilter.Text.Trim();
             s.StartDate            = dtpStart.Value;
             s.EndDate              = dtpEnd.Value;
-            s.GapAnalysisOnHistSync = radioHistSync.Checked;
             s.Save();
         }
 
@@ -805,24 +803,82 @@ namespace HistorianSyncTool.Forms
         }
 
         // ── Copy / Backfill ────────────────────────────────────────────────────────
+
+        /// <summary>Shows tag selection dialog and returns chosen tags, or null if cancelled.</summary>
+        private List<string> ShowTagSelectionDialog(
+            GapAnalysisResult gapResult, string sourceLabel, string targetLabel)
+        {
+            if (gapResult == null || !gapResult.HasGaps)
+            {
+                SetStatus($"No gaps found on {targetLabel} — nothing to backfill.", true);
+                return null;
+            }
+            if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
+            {
+                SetStatus("Both servers must be connected for backfill.", true);
+                return null;
+            }
+
+            int gapCount = gapResult.Gaps.Count;
+            int batchCount = gapResult.Gaps.Sum(g => g.Batches.Count(b => b.CanBackfill));
+            if (batchCount == 0)
+            {
+                SetStatus($"No backfillable batches on {targetLabel}.");
+                return null;
+            }
+
+            // Fetch tags that exist on BOTH servers
+            SetStatus("Loading shared tags…");
+            List<string> sharedTags;
+            try
+            {
+                var priTags = _data.BrowseTags(_connections.Primary, "*")
+                    .Select(t => t.Name).ToList();
+                var secTags = _data.BrowseTags(_connections.Secondary, "*")
+                    .Select(t => t.Name).ToList();
+                sharedTags = priTags.Intersect(secTags).OrderBy(n => n).ToList();
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Failed to load tags: {ex.Message}", true);
+                return null;
+            }
+
+            if (sharedTags.Count == 0)
+            {
+                SetStatus("No tags found on both servers.", true);
+                return null;
+            }
+
+            using (var dlg = new TagSelectionDialog(sourceLabel, targetLabel,
+                gapCount, batchCount, sharedTags))
+            {
+                if (dlg.ShowDialog(this) != System.Windows.Forms.DialogResult.OK)
+                    return null;
+                return dlg.SelectedTags;
+            }
+        }
+
         private async void btnCopyToSecondary_Click(object sender, EventArgs e)
         {
-            await ExecuteBackfill(
-                sourceResult: _lastSecondaryResult,
-                sourceConn: _connections.Primary,
-                targetConn: _connections.Secondary,
-                sourceLabel: "Primary",
-                targetLabel: "Secondary");
+            var tags = ShowTagSelectionDialog(_lastSecondaryResult, "Primary", "Secondary");
+            if (tags == null) return;
+
+            await ExecuteBackfill(_lastSecondaryResult, _connections.Primary,
+                _connections.Secondary, "Primary", "Secondary", tags);
+
+            await AutoRefreshAfterBackfill();
         }
 
         private async void btnCopyToPrimary_Click(object sender, EventArgs e)
         {
-            await ExecuteBackfill(
-                sourceResult: _lastPrimaryResult,
-                sourceConn: _connections.Secondary,
-                targetConn: _connections.Primary,
-                sourceLabel: "Secondary",
-                targetLabel: "Primary");
+            var tags = ShowTagSelectionDialog(_lastPrimaryResult, "Secondary", "Primary");
+            if (tags == null) return;
+
+            await ExecuteBackfill(_lastPrimaryResult, _connections.Secondary,
+                _connections.Primary, "Secondary", "Primary", tags);
+
+            await AutoRefreshAfterBackfill();
         }
 
         private async void btnBackfillPreview_Click(object sender, EventArgs e)
@@ -830,86 +886,60 @@ namespace HistorianSyncTool.Forms
             if (_lastPrimaryResult == null && _lastSecondaryResult == null)
             { SetStatus("Run 'Analyze Gaps' first.", true); return; }
 
-            int priGaps = _lastPrimaryResult?.Gaps.Count ?? 0;
-            int secGaps = _lastSecondaryResult?.Gaps.Count ?? 0;
-            int priBatches = _lastPrimaryResult?.Gaps.Sum(g => g.Batches.Count(b => b.CanBackfill)) ?? 0;
-            int secBatches = _lastSecondaryResult?.Gaps.Sum(g => g.Batches.Count(b => b.CanBackfill)) ?? 0;
+            // Show tag selection for the side that has gaps
+            List<string> tags = null;
+            if (_lastSecondaryResult != null && _lastSecondaryResult.HasGaps)
+            {
+                tags = ShowTagSelectionDialog(_lastSecondaryResult, "Primary", "Secondary");
+                if (tags == null) return;
+            }
+            else if (_lastPrimaryResult != null && _lastPrimaryResult.HasGaps)
+            {
+                tags = ShowTagSelectionDialog(_lastPrimaryResult, "Secondary", "Primary");
+                if (tags == null) return;
+            }
 
-            string tagName = radioHistSync.Checked
-                ? Settings.Default.SyncTagName
-                : cboPrimary.Text;
-
-            string msg = $"Backfill Preview for '{tagName}'\n\n" +
-                         $"Primary gaps:   {priGaps} ({priBatches} backfillable batches)\n" +
-                         $"Secondary gaps: {secGaps} ({secBatches} backfillable batches)\n\n" +
-                         $"Batch size: {_gapAnalysis.BatchSize.TotalMinutes} min\n\n" +
-                         "This will read data from the server that HAS data and write it\n" +
-                         "to the server with the gap. Original sample quality is preserved.\n\n" +
-                         "Proceed with backfill of BOTH servers?";
-
-            var result = MessageBox.Show(msg, "Confirm Backfill",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-
-            if (result != DialogResult.Yes) return;
-
+            // Backfill Secondary gaps (data from Primary → Secondary)
             if (_lastSecondaryResult != null && _lastSecondaryResult.HasGaps
-                && _connections.IsPrimaryConnected && _connections.IsSecondaryConnected)
+                && _connections.IsPrimaryConnected && _connections.IsSecondaryConnected
+                && tags != null)
             {
                 await ExecuteBackfill(_lastSecondaryResult, _connections.Primary,
-                    _connections.Secondary, "Primary", "Secondary");
+                    _connections.Secondary, "Primary", "Secondary", tags);
             }
 
+            // Backfill Primary gaps (data from Secondary → Primary)
             if (_lastPrimaryResult != null && _lastPrimaryResult.HasGaps
-                && _connections.IsPrimaryConnected && _connections.IsSecondaryConnected)
+                && _connections.IsPrimaryConnected && _connections.IsSecondaryConnected
+                && tags != null)
             {
                 await ExecuteBackfill(_lastPrimaryResult, _connections.Secondary,
-                    _connections.Primary, "Secondary", "Primary");
+                    _connections.Primary, "Secondary", "Primary", tags);
             }
+
+            await AutoRefreshAfterBackfill();
         }
 
         private async Task ExecuteBackfill(
-            GapAnalysisResult sourceResult,
+            GapAnalysisResult gapResult,
             ServerConnection sourceConn,
             ServerConnection targetConn,
             string sourceLabel,
-            string targetLabel)
+            string targetLabel,
+            List<string> tagsToBackfill)
         {
-            if (sourceResult == null || !sourceResult.HasGaps)
-            {
-                SetStatus($"No gaps found on {targetLabel} — nothing to backfill.", true);
-                return;
-            }
-            if (sourceConn == null || targetConn == null)
-            {
-                SetStatus("Both servers must be connected for backfill.", true);
-                return;
-            }
+            if (gapResult == null || !gapResult.HasGaps) return;
+            if (sourceConn == null || targetConn == null) return;
 
-            string tagName = radioHistSync.Checked
-                ? Settings.Default.SyncTagName
-                : cboPrimary.Text;
-
-            if (string.IsNullOrWhiteSpace(tagName))
-            { SetStatus("No tag selected for backfill.", true); return; }
-
-            var allBatches = sourceResult.Gaps
+            var allBatches = gapResult.Gaps
                 .SelectMany(g => g.Batches)
                 .Where(b => b.CanBackfill)
                 .ToList();
 
-            if (allBatches.Count == 0)
-            {
-                SetStatus($"No backfillable batches on {targetLabel}.");
-                return;
-            }
+            if (allBatches.Count == 0) return;
 
-            var confirmResult = MessageBox.Show(
-                $"Backfill {allBatches.Count} batch(es) from {sourceLabel} → {targetLabel}\n" +
-                $"Tag: {tagName}\n\nProceed?",
-                "Confirm Copy",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-
-            if (confirmResult != DialogResult.Yes) return;
+            int totalTags    = tagsToBackfill.Count;
+            int totalBatches = allBatches.Count;
 
             SetBusy(true, $"Backfilling {targetLabel}…");
             var report = new SyncRunReport
@@ -917,88 +947,104 @@ namespace HistorianSyncTool.Forms
                 StartedAt    = DateTime.Now,
                 SourceServer = sourceLabel,
                 TargetServer = targetLabel,
-                SourceTag    = tagName,
-                TargetTag    = tagName,
-                GapsFound    = sourceResult.Gaps.Count
+                GapsFound    = gapResult.Gaps.Count
             };
 
             try
             {
                 _cts = new CancellationTokenSource();
                 var token = _cts.Token;
-                int batchIndex = 0;
-                int totalBatches = allBatches.Count;
 
                 await Task.Run(() =>
                 {
-                    foreach (var batch in allBatches)
+                    for (int tagIdx = 0; tagIdx < totalTags; tagIdx++)
                     {
                         token.ThrowIfCancellationRequested();
-                        batchIndex++;
-                        report.BatchesAttempted++;
+                        string tag = tagsToBackfill[tagIdx];
+                        var tagResult = new TagBackfillResult { TagName = tag };
+                        report.TagResults.Add(tagResult);
 
-                        try
+                        Invoke((Action)(() =>
                         {
-                            var samples = _data.ReadRawInRange(sourceConn, tagName, batch.Start, batch.End);
+                            Log($"── Tag {tagIdx + 1}/{totalTags}: {tag} ──");
+                            SetStatus($"Tag {tagIdx + 1}/{totalTags}: {tag}");
+                        }));
 
-                            if (samples.Count == 0)
-                            {
-                                Invoke((Action)(() => Log($"  Batch {batchIndex}/{totalBatches}: no source data in [{batch.Start:HH:mm} – {batch.End:HH:mm}], skipped.")));
-                                continue;
-                            }
-
-                            var times     = samples.Select(s => s.Time).ToArray();
-                            var values    = samples.Select(s => s.Value).ToArray();
-                            var qualities = samples.Select(s =>
-                                s.Quality >= 100.0 ? DataQuality.Good :
-                                s.Quality > 0      ? DataQuality.Uncertain :
-                                                     DataQuality.Bad).ToArray();
-
-                            var errors = _data.WriteFloatSamplesWithQuality(targetConn, tagName, times, values, qualities);
-                            batch.SamplesWritten = samples.Count;
-
-                            if (errors.Count > 0)
-                            {
-                                foreach (var err in errors)
-                                    report.Errors.Add($"Batch {batchIndex}: {err}");
-                                Invoke((Action)(() => Log($"  Batch {batchIndex}/{totalBatches}: wrote {samples.Count} samples with {errors.Count} error(s).")));
-                            }
-                            else
-                            {
-                                report.BatchesSucceeded++;
-                                report.SamplesWritten += samples.Count;
-                            }
-
-                            var verify = _data.VerifyWrite(targetConn, tagName, batch.Start, batch.End, samples.Count);
-                            batch.Verified = verify.Actual >= verify.Expected;
-                            if (!batch.Verified)
-                            {
-                                string vmsg = $"Batch {batchIndex}: verification mismatch — wrote {verify.Expected}, found {verify.Actual}";
-                                report.Errors.Add(vmsg);
-                                Invoke((Action)(() => Log($"  Warning: {vmsg}")));
-                            }
-                        }
-                        catch (Exception ex)
+                        int batchIdx = 0;
+                        foreach (var batch in allBatches)
                         {
-                            report.BatchesFailed++;
-                            report.Errors.Add($"Batch {batchIndex}: {ex.Message}");
-                            Invoke((Action)(() => Log($"  Batch {batchIndex}/{totalBatches}: FAILED — {ex.Message}")));
+                            token.ThrowIfCancellationRequested();
+                            batchIdx++;
+                            tagResult.BatchesAttempted++;
+
+                            try
+                            {
+                                var samples = _data.ReadRawInRange(sourceConn, tag, batch.Start, batch.End);
+
+                                if (samples.Count == 0)
+                                    continue; // silently skip — no source data
+
+                                var times     = samples.Select(s => s.Time).ToArray();
+                                var values    = samples.Select(s => s.Value).ToArray();
+                                var qualities = samples.Select(s =>
+                                    s.Quality >= 100.0 ? DataQuality.Good :
+                                    s.Quality > 0      ? DataQuality.Uncertain :
+                                                         DataQuality.Bad).ToArray();
+
+                                var errors = _data.WriteFloatSamplesWithQuality(
+                                    targetConn, tag, times, values, qualities);
+
+                                if (errors.Count > 0)
+                                {
+                                    foreach (var err in errors)
+                                        tagResult.Errors.Add($"Batch {batchIdx}: {err}");
+                                }
+                                else
+                                {
+                                    tagResult.BatchesSucceeded++;
+                                    tagResult.SamplesWritten += samples.Count;
+                                }
+
+                                // Read-after-write verification
+                                var verify = _data.VerifyWrite(
+                                    targetConn, tag, batch.Start, batch.End, samples.Count);
+                                if (verify.Actual < verify.Expected)
+                                {
+                                    tagResult.Errors.Add(
+                                        $"Batch {batchIdx}: verification mismatch — wrote {verify.Expected}, found {verify.Actual}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                tagResult.BatchesFailed++;
+                                tagResult.Errors.Add($"Batch {batchIdx}: {ex.Message}");
+                            }
+
+                            // Progress: combined tag + batch
+                            int overallDone = tagIdx * totalBatches + batchIdx;
+                            int overallTotal = totalTags * totalBatches;
+                            Invoke((Action)(() =>
+                            {
+                                SetStatus($"Tag {tagIdx + 1}/{totalTags}: {tag} — Batch {batchIdx}/{totalBatches}");
+                                SetProgress(overallDone, overallTotal);
+                            }));
                         }
 
-                        Invoke((Action)(() => SetProgress(batchIndex, totalBatches)));
+                        Invoke((Action)(() =>
+                            Log($"  {tag}: {tagResult.BatchesSucceeded}/{tagResult.BatchesAttempted} batches, {tagResult.SamplesWritten} samples")));
                     }
                 }, token);
 
                 report.CompletedAt = DateTime.Now;
                 LogRunReport(report);
-                SetStatus($"Backfill complete: {report.BatchesSucceeded}/{report.BatchesAttempted} batches, {report.SamplesWritten} samples written.");
+                SetStatus($"Backfill complete: {report.BatchesSucceeded}/{report.BatchesAttempted} batches across {totalTags} tag(s), {report.SamplesWritten} samples written.");
             }
             catch (OperationCanceledException)
             {
                 report.CompletedAt = DateTime.Now;
                 report.Errors.Add("Operation cancelled by user.");
                 LogRunReport(report);
-                SetStatus("Backfill cancelled.");
+                SetStatus("Backfill cancelled — completed tags are preserved.");
             }
             catch (Exception ex)
             {
@@ -1013,13 +1059,24 @@ namespace HistorianSyncTool.Forms
         private void LogRunReport(SyncRunReport report)
         {
             Log("─── Sync Run Report ───────────────────────────");
-            Log($"  {report.SourceServer} → {report.TargetServer}  |  Tag: {report.SourceTag}");
+            Log($"  {report.SourceServer} \u2192 {report.TargetServer}  |  {report.TagResults.Count} tag(s)");
             Log($"  Duration: {report.Duration.TotalSeconds:F1}s");
             Log($"  Gaps: {report.GapsFound}  |  Batches: {report.BatchesAttempted} attempted, {report.BatchesSucceeded} succeeded, {report.BatchesFailed} failed");
             Log($"  Samples written: {report.SamplesWritten}");
+
+            foreach (var tr in report.TagResults)
+            {
+                if (tr.Errors.Count > 0)
+                {
+                    Log($"  Tag '{tr.TagName}': {tr.Errors.Count} error(s):");
+                    foreach (var err in tr.Errors)
+                        Log($"    - {err}");
+                }
+            }
+
             if (report.Errors.Count > 0)
             {
-                Log($"  Errors ({report.Errors.Count}):");
+                Log($"  Global errors ({report.Errors.Count}):");
                 foreach (var err in report.Errors)
                     Log($"    - {err}");
             }
@@ -1029,21 +1086,32 @@ namespace HistorianSyncTool.Forms
         // ── Gap Analysis ───────────────────────────────────────────────────────────
         private async void btnAnalyzeGaps_Click(object sender, EventArgs e)
         {
-            bool hasPrimary   = _connections.IsPrimaryConnected;
-            bool hasSecondary = _connections.IsSecondaryConnected;
-            if (!hasPrimary && !hasSecondary)
+            if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected)
             { SetStatus("Connect to at least one server first.", true); return; }
-
-            string tagName = radioHistSync.Checked
-                ? Settings.Default.SyncTagName
-                : cboPrimary.Text;
-
-            if (string.IsNullOrWhiteSpace(tagName))
-            { SetStatus("Select a tag (or switch to HistSync mode).", true); return; }
 
             DateTime from = dtpStart.Value;
             DateTime to   = dtpEnd.Value;
             if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+
+            await RunGapAnalysis(from, to);
+        }
+
+        /// <summary>
+        /// Core gap analysis logic — always uses HistSync tag.
+        /// Reusable: called from button click and auto-refresh after backfill.
+        /// </summary>
+        private async Task RunGapAnalysis(DateTime from, DateTime to)
+        {
+            bool hasPrimary   = _connections.IsPrimaryConnected;
+            bool hasSecondary = _connections.IsSecondaryConnected;
+
+            string tagName = Settings.Default.SyncTagName;
+            if (string.IsNullOrWhiteSpace(tagName))
+            { SetStatus("SyncTagName not configured in app settings.", true); return; }
+
+            // Capture UI values before Task.Run
+            string priHost = txtPrimary.Text.Trim();
+            string secHost = txtSecondary.Text.Trim();
 
             SetBusy(true);
             SetStatus($"Analyzing gaps for '{tagName}'…");
@@ -1083,9 +1151,9 @@ namespace HistorianSyncTool.Forms
                 }, token);
 
                 if (priTimes != null)
-                    _lastPrimaryResult = _gapAnalysis.Analyze(priTimes, txtPrimary.Text.Trim());
+                    _lastPrimaryResult = _gapAnalysis.Analyze(priTimes, priHost);
                 if (secTimes != null)
-                    _lastSecondaryResult = _gapAnalysis.Analyze(secTimes, txtSecondary.Text.Trim());
+                    _lastSecondaryResult = _gapAnalysis.Analyze(secTimes, secHost);
 
                 if (_lastPrimaryResult != null && secTimes != null)
                     _gapAnalysis.MarkBackfillFeasibility(_lastPrimaryResult, secTimes);
@@ -1101,6 +1169,19 @@ namespace HistorianSyncTool.Forms
             catch (OperationCanceledException) { SetStatus("Analysis cancelled."); }
             catch (Exception ex) { SetStatus($"Analysis failed: {ex.Message}", true); }
             finally { SetBusy(false); }
+        }
+
+        /// <summary>
+        /// After backfill, re-run gap analysis and reload data tables if they were populated.
+        /// </summary>
+        private async Task AutoRefreshAfterBackfill()
+        {
+            DateTime from = dtpStart.Value;
+            DateTime to   = dtpEnd.Value;
+            if (from >= to) return;
+
+            Log("Auto-refreshing gap analysis after backfill…");
+            await RunGapAnalysis(from, to);
         }
 
         private void UpdateGapAnalysisUI(DateTime from, DateTime to)
@@ -1252,12 +1333,5 @@ namespace HistorianSyncTool.Forms
                 Clipboard.SetText(txtLog.Text);
         }
 
-        // ── Mode radio changed ─────────────────────────────────────────────────────
-        private void radioMode_CheckedChanged(object sender, EventArgs e)
-        {
-            bool useTag = radioSelectedTag.Checked;
-            cboPrimary.BackColor   = useTag ? AppTheme.NavyLight : Color.White;
-            cboSecondary.BackColor = useTag ? AppTheme.NavyLight : Color.White;
-        }
     }
 }

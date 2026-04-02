@@ -38,19 +38,21 @@ namespace HistorianSyncTool.Forms
         private Label          lblSecondaryStatus;
         private FlatButton     btnConnect;
 
-        // Left — Evaluation period (includes mode radios)
+        // Left — Evaluation period
         private SectionHeader  hdrPeriod;
         private Label          lblStartDate;
         private DateTimePicker dtpStart;
         private Label          lblEndDate;
         private DateTimePicker dtpEnd;
         private Panel          pnlQuickDates;
+        private Button         btnLast1h;
+        private Button         btnLast6h;
+        private Button         btnLast24h;
+        private Button         btnLast3d;
         private Button         btnLast7d;
         private Button         btnLast30d;
+        private Button         btnLast90d;
         private Button         btnLastYear;
-        private Label          lblModeHeader;
-        private RadioButton    radioHistSync;
-        private RadioButton    radioSelectedTag;
         private FlatButton     btnAnalyzeGaps;
 
         // Left — Tags
@@ -271,50 +273,44 @@ namespace HistorianSyncTool.Forms
             lblEndDate   = MakeLabel("End date", lw, pad, dtpStart.Bottom + 6);
             dtpEnd       = MakeDtp(lw, pad, lblEndDate.Bottom + 2);
 
-            // Quick-select presets
-            pnlQuickDates = new Panel { Left = pad, Top = dtpEnd.Bottom + 6, Width = lw, Height = 24 };
-            int qw = (lw - 8) / 3;
-            btnLast7d   = MakeQuickBtn("Last 7 days",  0);
-            btnLast30d  = MakeQuickBtn("Last 30 days", qw + 4);
-            btnLastYear = MakeQuickBtn("Last year",    (qw + 4) * 2);
-            btnLast7d.Width = btnLast30d.Width = btnLastYear.Width = qw;
-            btnLast7d.Click   += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-7);  dtpEnd.Value = System.DateTime.Now; };
-            btnLast30d.Click  += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-30); dtpEnd.Value = System.DateTime.Now; };
-            btnLastYear.Click += (s, e) => { dtpStart.Value = System.DateTime.Now.AddYears(-1); dtpEnd.Value = System.DateTime.Now; };
-            pnlQuickDates.Controls.Add(btnLast7d);
-            pnlQuickDates.Controls.Add(btnLast30d);
-            pnlQuickDates.Controls.Add(btnLastYear);
+            // Quick-select presets — 4x2 grid
+            pnlQuickDates = new Panel { Left = pad, Top = dtpEnd.Bottom + 6, Width = lw, Height = 52 };
+            int qw = (lw - 12) / 4;  // 4 columns with 4px gaps
+            int qh = 22;
+            btnLast1h   = MakeQuickBtn("1h",   0);
+            btnLast6h   = MakeQuickBtn("6h",   qw + 4);
+            btnLast24h  = MakeQuickBtn("24h",  (qw + 4) * 2);
+            btnLast3d   = MakeQuickBtn("3d",   (qw + 4) * 3);
+            btnLast7d   = MakeQuickBtn("7d",   0);
+            btnLast30d  = MakeQuickBtn("30d",  qw + 4);
+            btnLast90d  = MakeQuickBtn("90d",  (qw + 4) * 2);
+            btnLastYear = MakeQuickBtn("1y",   (qw + 4) * 3);
+            // Row 1
+            btnLast1h.Width = btnLast6h.Width = btnLast24h.Width = btnLast3d.Width = qw;
+            btnLast1h.Height = btnLast6h.Height = btnLast24h.Height = btnLast3d.Height = qh;
+            // Row 2
+            btnLast7d.Top = btnLast30d.Top = btnLast90d.Top = btnLastYear.Top = qh + 4;
+            btnLast7d.Width = btnLast30d.Width = btnLast90d.Width = btnLastYear.Width = qw;
+            btnLast7d.Height = btnLast30d.Height = btnLast90d.Height = btnLastYear.Height = qh;
 
-            // Mode selector sits directly above Analyze Gaps
-            lblModeHeader = new Label
-            {
-                Text = "Analyze by:", Left = pad, Top = pnlQuickDates.Bottom + 10,
-                Width = lw, Height = 16,
-                Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary, AutoSize = false
-            };
-            radioHistSync = new RadioButton
-            {
-                Text = "HistSync heartbeat tag",
-                Left = pad + 4, Top = lblModeHeader.Bottom + 2, Width = lw - 4,
-                Font = AppTheme.Default, ForeColor = AppTheme.TextPrimary, Checked = true
-            };
-            radioSelectedTag = new RadioButton
-            {
-                Text = "Currently selected tag",
-                Left = pad + 4, Top = radioHistSync.Bottom + 2, Width = lw - 4,
-                Font = AppTheme.Default, ForeColor = AppTheme.TextPrimary
-            };
-            radioHistSync.CheckedChanged    += radioMode_CheckedChanged;
-            radioSelectedTag.CheckedChanged += radioMode_CheckedChanged;
+            btnLast1h.Click   += (s, e) => { dtpStart.Value = System.DateTime.Now.AddHours(-1);  dtpEnd.Value = System.DateTime.Now; };
+            btnLast6h.Click   += (s, e) => { dtpStart.Value = System.DateTime.Now.AddHours(-6);  dtpEnd.Value = System.DateTime.Now; };
+            btnLast24h.Click  += (s, e) => { dtpStart.Value = System.DateTime.Now.AddHours(-24); dtpEnd.Value = System.DateTime.Now; };
+            btnLast3d.Click   += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-3);   dtpEnd.Value = System.DateTime.Now; };
+            btnLast7d.Click   += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-7);   dtpEnd.Value = System.DateTime.Now; };
+            btnLast30d.Click  += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-30);  dtpEnd.Value = System.DateTime.Now; };
+            btnLast90d.Click  += (s, e) => { dtpStart.Value = System.DateTime.Now.AddDays(-90);  dtpEnd.Value = System.DateTime.Now; };
+            btnLastYear.Click += (s, e) => { dtpStart.Value = System.DateTime.Now.AddYears(-1);  dtpEnd.Value = System.DateTime.Now; };
+            pnlQuickDates.Controls.AddRange(new Control[]
+                { btnLast1h, btnLast6h, btnLast24h, btnLast3d, btnLast7d, btnLast30d, btnLast90d, btnLastYear });
 
-            btnAnalyzeGaps = MakeButton("Analyze Gaps", lw, pad, radioSelectedTag.Bottom + 8);
+            btnAnalyzeGaps = MakeButton("Analyze Gaps", lw, pad, pnlQuickDates.Bottom + 8);
             btnAnalyzeGaps.Click += btnAnalyzeGaps_Click;
 
             pnlPeriodContent.Controls.AddRange(new Control[]
             {
                 lblStartDate, dtpStart, lblEndDate, dtpEnd,
                 pnlQuickDates,
-                lblModeHeader, radioHistSync, radioSelectedTag,
                 btnAnalyzeGaps
             });
             pnlPeriodContent.Height = btnAnalyzeGaps.Bottom + 10;
@@ -636,6 +632,7 @@ namespace HistorianSyncTool.Forms
         {
             AppTheme.StyleGrid(gridGaps);
             gridGaps.ReadOnly = true;
+            gridGaps.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Server",       Name = "Server",   FillWeight = 12 });
             gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Start",        Name = "Start",    FillWeight = 24 });
             gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "End",          Name = "End",      FillWeight = 24 });
@@ -731,7 +728,7 @@ namespace HistorianSyncTool.Forms
         private static DateTimePicker MakeDtp(int width, int left, int top) => new DateTimePicker
         {
             Left = left, Top = top, Width = width, Height = AppTheme.ControlHeight,
-            Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd HH:mm:ss", ShowUpDown = true
+            Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd HH:mm:ss", ShowUpDown = false
         };
 
         private static FlatButton MakeButton(string text, int width, int left, int top) =>
