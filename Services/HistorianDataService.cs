@@ -2,6 +2,7 @@ using Proficy.Historian.ClientAccess.API;
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace HistorianSyncTool.Services
 {
@@ -88,15 +89,15 @@ namespace HistorianSyncTool.Services
             });
         }
 
-        /// <summary>Returns raw samples in [start, end) — half-open interval.</summary>
-        public List<(DateTime Time, float Value)> ReadRawInRange(
+        /// <summary>Returns raw samples in [start, end) — half-open interval, with quality.</summary>
+        public List<(DateTime Time, float Value, double Quality)> ReadRawInRange(
             ServerConnection conn, string tagName, DateTime start, DateTime end)
         {
             return Retry(() =>
             {
                 DataQueryParams query = new RawByTimeQuery(start, tagName)
                 {
-                    Fields = DataFields.Time | DataFields.Value
+                    Fields = DataFields.Time | DataFields.Value | DataFields.Quality
                 };
                 ItemErrors errors;
                 Proficy.Historian.ClientAccess.API.DataSet all = new Proficy.Historian.ClientAccess.API.DataSet();
@@ -105,7 +106,7 @@ namespace HistorianSyncTool.Services
                     all.AddRange(page);
                 all.AddRange(page);
 
-                var result = new List<(DateTime, float)>();
+                var result = new List<(DateTime, float, double)>();
                 for (int i = 0; i < all.TotalSamples; i++)
                 {
                     DateTime t = all[tagName].GetTime(i);
@@ -115,7 +116,10 @@ namespace HistorianSyncTool.Services
                     if (raw == null) continue;
                     float v;
                     if (float.TryParse(raw.ToString(), out v))
-                        result.Add((t, v));
+                    {
+                        double q = all[tagName].GetQuality(i).PercentGood();
+                        result.Add((t, v, q));
+                    }
                 }
                 return result;
             });
@@ -123,7 +127,7 @@ namespace HistorianSyncTool.Services
 
         // ── Data Writes ────────────────────────────────────────────────────────────
 
-        /// <summary>Writes float samples to the target tag. Returns any error messages.</summary>
+        /// <summary>Writes float samples with DataQuality.Good. Use for manual single writes.</summary>
         public List<string> WriteFloatSamples(
             ServerConnection conn, string tagName,
             List<DateTime> times, List<float> values)
@@ -146,6 +150,43 @@ namespace HistorianSyncTool.Services
                         messages.Add($"Tag {kv.Key}: {kv.Value}");
                 return messages;
             });
+        }
+
+        /// <summary>Writes float samples preserving original quality per sample. Used for backfill.</summary>
+        public List<string> WriteFloatSamplesWithQuality(
+            ServerConnection conn, string tagName,
+            DateTime[] times, float[] values, DataQuality[] qualities)
+        {
+            return Retry(() =>
+            {
+                Proficy.Historian.ClientAccess.API.DataSet set = new Proficy.Historian.ClientAccess.API.DataSet();
+                set[tagName] = new DataSamples<float>
+                {
+                    Times = times,
+                    Values = values,
+                    Qualities = qualities
+                };
+                ItemErrors errors;
+                conn.IData.Add(set, false, out errors);
+
+                var messages = new List<string>();
+                if (errors != null)
+                    foreach (var kv in errors)
+                        messages.Add($"Tag {kv.Key}: {kv.Value}");
+                return messages;
+            });
+        }
+
+        /// <summary>
+        /// Read-after-write verification: re-query target range and compare sample count.
+        /// Returns (expectedCount, actualCount).
+        /// </summary>
+        public (int Expected, int Actual) VerifyWrite(
+            ServerConnection conn, string tagName,
+            DateTime start, DateTime end, int expectedCount)
+        {
+            var samples = ReadRawInRange(conn, tagName, start, end);
+            return (expectedCount, samples.Count);
         }
 
         // ── Helpers ────────────────────────────────────────────────────────────────
@@ -174,7 +215,7 @@ namespace HistorianSyncTool.Services
                 catch (Exception ex)
                 {
                     last = ex;
-                    if (attempt < _retryDelaysMs.Length)
+                    if (attempt < _maxRetries - 1 && attempt < _retryDelaysMs.Length)
                         Thread.Sleep(_retryDelaysMs[attempt]);
                 }
             }

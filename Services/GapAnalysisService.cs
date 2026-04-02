@@ -1,6 +1,7 @@
 using HistorianSyncTool.Models;
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Linq;
 
 namespace HistorianSyncTool.Services
@@ -15,11 +16,25 @@ namespace HistorianSyncTool.Services
 
         public GapAnalysisService(TimeSpan? batchSize = null)
         {
-            _batchSize = batchSize ?? TimeSpan.FromMinutes(10);
+            if (batchSize.HasValue)
+            {
+                _batchSize = batchSize.Value;
+            }
+            else
+            {
+                int minutes;
+                string cfgValue = ConfigurationManager.AppSettings["BatchSizeMinutes"];
+                _batchSize = int.TryParse(cfgValue, out minutes) && minutes > 0
+                    ? TimeSpan.FromMinutes(minutes)
+                    : TimeSpan.FromMinutes(10);
+            }
         }
 
+        public TimeSpan BatchSize => _batchSize;
+
         /// <summary>
-        /// Analyze a sorted list of sample timestamps, detect gaps, and split them into batches.
+        /// Analyze a list of sample timestamps, detect gaps, and split them into batches.
+        /// Input is sorted automatically if needed.
         /// </summary>
         public GapAnalysisResult Analyze(List<DateTime> sampleTimes, string serverLabel)
         {
@@ -31,6 +46,16 @@ namespace HistorianSyncTool.Services
                 result.SampleTimes = sampleTimes ?? new List<DateTime>();
                 result.CoverageRatio = result.HasData ? 1.0 : 0.0;
                 return result;
+            }
+
+            // Ensure sorted
+            for (int i = 1; i < sampleTimes.Count; i++)
+            {
+                if (sampleTimes[i] < sampleTimes[i - 1])
+                {
+                    sampleTimes = sampleTimes.OrderBy(t => t).ToList();
+                    break;
+                }
             }
 
             result.HasData = true;
@@ -85,17 +110,26 @@ namespace HistorianSyncTool.Services
         /// </summary>
         public void MarkBackfillFeasibility(GapAnalysisResult result, List<DateTime> otherServerSamples)
         {
-            if (result?.Gaps == null || otherServerSamples == null) return;
+            if (result?.Gaps == null || otherServerSamples == null || otherServerSamples.Count == 0) return;
 
-            var sorted = new SortedSet<DateTime>(otherServerSamples);
+            var sorted = new List<DateTime>(otherServerSamples);
+            sorted.Sort();
+
             foreach (var gap in result.Gaps)
+            {
                 foreach (var batch in gap.Batches)
-                    batch.CanBackfill = sorted.Any(t => t >= batch.Start && t < batch.End);
+                {
+                    // Binary search for efficiency
+                    int idx = sorted.BinarySearch(batch.Start);
+                    if (idx < 0) idx = ~idx;
+                    batch.CanBackfill = idx < sorted.Count && sorted[idx] < batch.End;
+                }
+            }
         }
 
-        // ── Private Helpers ────────────────────────────────────────────────────────
+        // ── Internal (exposed for testing) ─────────────────────────────────────────
 
-        private List<GapBatch> PlanBatches(DateTime start, DateTime end)
+        internal List<GapBatch> PlanBatches(DateTime start, DateTime end)
         {
             var batches = new List<GapBatch>();
             DateTime cursor = start;
@@ -108,7 +142,7 @@ namespace HistorianSyncTool.Services
             return batches;
         }
 
-        private static TimeSpan Median(List<TimeSpan> spans)
+        internal static TimeSpan Median(List<TimeSpan> spans)
         {
             if (spans.Count == 0) return TimeSpan.Zero;
             var sorted = spans.OrderBy(s => s.Ticks).ToList();

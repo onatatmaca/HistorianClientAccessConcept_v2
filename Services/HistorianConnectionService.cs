@@ -1,5 +1,6 @@
 using Proficy.Historian.ClientAccess.API;
 using System;
+using System.Diagnostics;
 
 namespace HistorianSyncTool.Services
 {
@@ -15,26 +16,37 @@ namespace HistorianSyncTool.Services
         public ServerConnection Primary => _primary;
         public ServerConnection Secondary => _secondary;
 
+        public string PrimaryHostname { get; private set; }
+        public string SecondaryHostname { get; private set; }
+
         public void ConnectPrimary(string hostname)
         {
+            if (string.IsNullOrWhiteSpace(hostname))
+                throw new ArgumentException("Hostname cannot be empty.", nameof(hostname));
             DisconnectPrimary();
             _primary = new ServerConnection(new ConnectionProperties { ServerHostName = hostname });
             _primary.Connect();
+            PrimaryHostname = hostname;
         }
 
         public void ConnectSecondary(string hostname)
         {
+            if (string.IsNullOrWhiteSpace(hostname))
+                throw new ArgumentException("Hostname cannot be empty.", nameof(hostname));
             DisconnectSecondary();
             _secondary = new ServerConnection(new ConnectionProperties { ServerHostName = hostname });
             _secondary.Connect();
+            SecondaryHostname = hostname;
         }
 
         public void DisconnectPrimary()
         {
             if (_primary != null)
             {
-                try { if (_primary.IsConnected()) _primary.Disconnect(); } catch { }
+                try { if (_primary.IsConnected()) _primary.Disconnect(); }
+                catch (Exception ex) { Trace.TraceWarning("Error disconnecting primary: " + ex.Message); }
                 _primary = null;
+                PrimaryHostname = null;
             }
         }
 
@@ -42,8 +54,10 @@ namespace HistorianSyncTool.Services
         {
             if (_secondary != null)
             {
-                try { if (_secondary.IsConnected()) _secondary.Disconnect(); } catch { }
+                try { if (_secondary.IsConnected()) _secondary.Disconnect(); }
+                catch (Exception ex) { Trace.TraceWarning("Error disconnecting secondary: " + ex.Message); }
                 _secondary = null;
+                SecondaryHostname = null;
             }
         }
 

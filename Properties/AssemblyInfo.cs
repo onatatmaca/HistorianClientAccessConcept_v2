@@ -1,5 +1,8 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+
+[assembly: InternalsVisibleTo("HistorianSyncTool.Tests")]
 
 [assembly: AssemblyTitle("Historian Sync Tool")]
 [assembly: AssemblyDescription("GE Proficy Historian synchronization and gap analysis tool")]
