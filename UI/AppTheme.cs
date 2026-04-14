@@ -38,8 +38,8 @@ namespace HistorianSyncTool.UI
         public const int ControlHeight   = 26;
         public const int ButtonHeight    = 30;
         public const int SectionPad      = 10;
-        public const int LeftPanelWidth  = 285;
-        public const int RightPanelWidth = 390;
+        public const int LeftPanelWidth  = 265;
+        public const int RightPanelWidth = 340;
         public const int StatusBarHeight = 34;
 
         // ── Grid style helper ──────────────────────────────────────────────────────

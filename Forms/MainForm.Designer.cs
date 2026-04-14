@@ -131,11 +131,17 @@ namespace HistorianSyncTool.Forms
             // ── Form ───────────────────────────────────────────────────────────────
             this.Font          = AppTheme.Default;
             this.BackColor     = AppTheme.Background;
-            this.MinimumSize   = new Size(1100, 700);
-            this.Size          = new Size(1380, 820);
+            this.AutoScaleMode = AutoScaleMode.Font;
+            this.MinimumSize   = new Size(1000, 650);
             this.Text          = "Historian Sync Tool";
             this.StartPosition = FormStartPosition.CenterScreen;
             this.Padding       = new Padding(8, 4, 8, 0);  // breathing room around all panels
+
+            // Fit to screen: use 90% of working area or 1380x820, whichever is smaller
+            var screen = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
+            int formW  = System.Math.Min(1380, (int)(screen.Width  * 0.92));
+            int formH  = System.Math.Min(820,  (int)(screen.Height * 0.92));
+            this.Size  = new Size(formW, formH);
 
             // ══════════════════════════════════════════════════════════════════════
             // STATUS BAR  (Dock=Bottom)
