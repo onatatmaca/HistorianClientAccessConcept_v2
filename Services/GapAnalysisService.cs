@@ -34,9 +34,13 @@ namespace HistorianSyncTool.Services
 
         /// <summary>
         /// Analyze a list of sample timestamps, detect gaps, and split them into batches.
+        /// <paramref name="evalFrom"/> and <paramref name="evalTo"/> define the evaluation
+        /// window so that leading gaps (data starts late) and trailing gaps (data ends early)
+        /// are detected — not just internal gaps between consecutive samples.
         /// Input is sorted automatically if needed.
         /// </summary>
-        public GapAnalysisResult Analyze(List<DateTime> sampleTimes, string serverLabel)
+        public GapAnalysisResult Analyze(List<DateTime> sampleTimes, string serverLabel,
+            DateTime evalFrom = default, DateTime evalTo = default)
         {
             var result = new GapAnalysisResult { ServerLabel = serverLabel };
 
@@ -74,6 +78,27 @@ namespace HistorianSyncTool.Services
 
             // Detect gaps
             TimeSpan totalMissing = TimeSpan.Zero;
+
+            // Leading gap: data starts after the evaluation period start
+            if (evalFrom != default && result.FirstTimestamp > evalFrom)
+            {
+                TimeSpan leadingDelta = result.FirstTimestamp - evalFrom;
+                if (leadingDelta > gapThreshold)
+                {
+                    var window = new GapWindow
+                    {
+                        Start = evalFrom,
+                        End   = result.FirstTimestamp
+                    };
+                    window.Batches = PlanBatches(window.Start, window.End);
+                    result.Gaps.Add(window);
+                    totalMissing += leadingDelta;
+                    if (leadingDelta > result.LargestGapDuration)
+                        result.LargestGapDuration = leadingDelta;
+                }
+            }
+
+            // Internal gaps between consecutive samples
             for (int i = 1; i < sampleTimes.Count; i++)
             {
                 TimeSpan delta = sampleTimes[i] - sampleTimes[i - 1];
@@ -94,9 +119,31 @@ namespace HistorianSyncTool.Services
                 }
             }
 
+            // Trailing gap: data ends before the evaluation period end
+            if (evalTo != default && result.LastTimestamp < evalTo)
+            {
+                TimeSpan trailingDelta = evalTo - result.LastTimestamp;
+                if (trailingDelta > gapThreshold)
+                {
+                    var window = new GapWindow
+                    {
+                        Start = result.LastTimestamp,
+                        End   = evalTo
+                    };
+                    window.Batches = PlanBatches(window.Start, window.End);
+                    result.Gaps.Add(window);
+                    totalMissing += trailingDelta;
+                    if (trailingDelta > result.LargestGapDuration)
+                        result.LargestGapDuration = trailingDelta;
+                }
+            }
+
             result.TotalMissingDuration = totalMissing;
 
-            TimeSpan totalSpan = result.LastTimestamp - result.FirstTimestamp;
+            // Coverage ratio against the full evaluation period (not just first-to-last sample)
+            DateTime spanStart = evalFrom != default ? evalFrom : result.FirstTimestamp;
+            DateTime spanEnd   = evalTo   != default ? evalTo   : result.LastTimestamp;
+            TimeSpan totalSpan = spanEnd - spanStart;
             result.CoverageRatio = totalSpan.Ticks > 0
                 ? Math.Max(0, (totalSpan - totalMissing).Ticks / (double)totalSpan.Ticks)
                 : 1.0;

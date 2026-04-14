@@ -1151,9 +1151,9 @@ namespace HistorianSyncTool.Forms
                 }, token);
 
                 if (priTimes != null)
-                    _lastPrimaryResult = _gapAnalysis.Analyze(priTimes, priHost);
+                    _lastPrimaryResult = _gapAnalysis.Analyze(priTimes, priHost, from, to);
                 if (secTimes != null)
-                    _lastSecondaryResult = _gapAnalysis.Analyze(secTimes, secHost);
+                    _lastSecondaryResult = _gapAnalysis.Analyze(secTimes, secHost, from, to);
 
                 if (_lastPrimaryResult != null && secTimes != null)
                     _gapAnalysis.MarkBackfillFeasibility(_lastPrimaryResult, secTimes);
