@@ -379,41 +379,59 @@ namespace HistorianSyncTool.Forms
                 e.Graphics.DrawLine(new Pen(AppTheme.Border), 0, 0, 0, pnlRight.Height);
 
             pnlRightContent = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1, 0, 0, 0) };
-            int rw  = AppTheme.RightPanelWidth - 2;
             const int rpad = 8;
-            int rlw = rw - rpad * 2;
 
-            hdrGapAnalysis = new SectionHeader { Text = "GAP ANALYSIS", Left = 0, Top = 0, Width = rw };
+            // Top section: coverage bars + summary (Dock=Top, absolute positioning inside)
+            hdrGapAnalysis = new SectionHeader { Text = "GAP ANALYSIS", Dock = DockStyle.Top };
 
-            lblPrimaryGap = MakeLabel("Primary server coverage", rlw, rpad, hdrGapAnalysis.Bottom + 10);
-            barPrimary    = new CoverageBar { Left = rpad, Top = lblPrimaryGap.Bottom + 3, Width = rlw, Height = 28 };
+            var pnlCoverage = new Panel { Dock = DockStyle.Top, Padding = new Padding(rpad, 10, rpad, 4) };
 
-            lblSecondaryGap = MakeLabel("Secondary server coverage", rlw, rpad, barPrimary.Bottom + 10);
-            barSecondary    = new CoverageBar { Left = rpad, Top = lblSecondaryGap.Bottom + 3, Width = rlw, Height = 28 };
+            lblPrimaryGap = new Label
+            {
+                Text = "Primary server coverage", Dock = DockStyle.Top, Height = 16,
+                Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary
+            };
+            barPrimary = new CoverageBar { Dock = DockStyle.Top, Height = 28 };
+
+            lblSecondaryGap = new Label
+            {
+                Text = "Secondary server coverage", Dock = DockStyle.Top, Height = 16,
+                Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary,
+                Padding = new Padding(0, 8, 0, 0)
+            };
+            barSecondary = new CoverageBar { Dock = DockStyle.Top, Height = 28 };
 
             lblGapSummary = new Label
             {
                 Text = "Connect to both servers, then click 'Analyze Gaps'",
-                Left = rpad, Top = barSecondary.Bottom + 8,
-                Width = rlw, Height = 32,
+                Dock = DockStyle.Top, Height = 32,
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary,
-                AutoSize = false
+                Padding = new Padding(0, 6, 0, 0)
             };
 
-            gridGaps = new System.Windows.Forms.DataGridView
+            // Add in reverse order for Dock=Top (last added docks first)
+            pnlCoverage.Controls.Add(lblGapSummary);
+            pnlCoverage.Controls.Add(barSecondary);
+            pnlCoverage.Controls.Add(lblSecondaryGap);
+            pnlCoverage.Controls.Add(barPrimary);
+            pnlCoverage.Controls.Add(lblPrimaryGap);
+            pnlCoverage.Height = 16 + 28 + 24 + 28 + 32 + 10 + 4; // labels + bars + summary + padding
+
+            // Grid fills remaining space — wrapped in panel for padding
+            var pnlGridWrap = new Panel
             {
-                Left   = rpad, Top = lblGapSummary.Bottom + 4,
-                Width  = rlw,  Height = 200,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
+                Dock    = DockStyle.Fill,
+                Padding = new Padding(rpad, 4, rpad, 4)
             };
+            gridGaps = new System.Windows.Forms.DataGridView { Dock = DockStyle.Fill };
             SetupGapGrid();
+            pnlGridWrap.Controls.Add(gridGaps);
 
-            // Bottom action bar — Dock=Bottom so it always sits at the panel's lower edge
-            // regardless of form height at construction time.
+            // Bottom action bar
             pnlRightBottom = new Panel
             {
                 Dock      = DockStyle.Bottom,
-                Height    = AppTheme.ButtonHeight * 2 + 14,   // stop + backfill + padding
+                Height    = AppTheme.ButtonHeight * 2 + 14,
                 BackColor = AppTheme.Surface,
                 Padding   = new Padding(rpad, 4, rpad, 6)
             };
@@ -423,8 +441,7 @@ namespace HistorianSyncTool.Forms
             btnBackfillPreview = new FlatButton
             {
                 Text  = "Preview & Backfill…",
-                Left  = rpad, Top = AppTheme.ButtonHeight + 8,
-                Width = rlw
+                Dock  = DockStyle.Bottom
             };
             btnBackfillPreview.Click += btnBackfillPreview_Click;
 
@@ -432,8 +449,7 @@ namespace HistorianSyncTool.Forms
             {
                 Text        = "■  Stop",
                 ButtonStyle = FlatButtonStyle.Danger,
-                Left        = rpad, Top = 4,
-                Width       = rlw,
+                Dock        = DockStyle.Top,
                 Visible     = false
             };
             btnStop.Click += btnStop_Click;
@@ -441,15 +457,12 @@ namespace HistorianSyncTool.Forms
             pnlRightBottom.Controls.Add(btnStop);
             pnlRightBottom.Controls.Add(btnBackfillPreview);
 
-            pnlRightContent.Controls.AddRange(new Control[]
-            {
-                hdrGapAnalysis,
-                lblPrimaryGap,   barPrimary,
-                lblSecondaryGap, barSecondary,
-                lblGapSummary,   gridGaps
-            });
-            pnlRight.Controls.Add(pnlRightBottom);    // Bottom — added before Fill
-            pnlRight.Controls.Add(pnlRightContent);   // Fill
+            // Assemble right panel (add Bottom/Top before Fill)
+            pnlRightContent.Controls.Add(pnlGridWrap);     // Fill — last
+            pnlRightContent.Controls.Add(pnlCoverage);     // Top — after header
+            pnlRightContent.Controls.Add(hdrGapAnalysis);   // Top — first
+            pnlRight.Controls.Add(pnlRightBottom);          // Bottom
+            pnlRight.Controls.Add(pnlRightContent);         // Fill
 
             // ══════════════════════════════════════════════════════════════════════
             // CENTER PANEL  (Dock=Fill)
