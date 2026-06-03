@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Packages
+packages/
+
+# Generated
+*.Designer.cs.bak
+
+# Scheduler runtime audit log (created at runtime)
+logs/
+
+# OS
+Thumbs.db
+Desktop.ini

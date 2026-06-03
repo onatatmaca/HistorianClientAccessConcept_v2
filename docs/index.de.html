@@ -1,0 +1,1784 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HistorianSyncTool — Technische Dokumentation</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/csharp.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+
+<style>
+:root {
+  --navy: #1E3A5F;
+  --navy-light: #E8F0FA;
+  --teal: #1ABC9C;
+  --bg: #f8f9fb;
+  --surface: #fff;
+  --border: #dde2e8;
+  --text: #2C3E50;
+  --text-soft: #7F8C8D;
+  --success: #27AE60;
+  --danger: #E74C3C;
+  --warning: #F39C12;
+  --code-bg: #f6f8fa;
+  --link: #1E3A5F;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.lang-bar {
+  position: fixed;
+  top: 12px;
+  right: 18px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  z-index: 10;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+.lang-bar a { color: #fff; text-decoration: none; opacity: 0.6; padding: 0 4px; }
+.lang-bar a.active { opacity: 1; font-weight: 700; }
+.lang-bar a:hover { opacity: 1; }
+
+.app { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar-header { padding: 20px 18px 14px; border-bottom: 1px solid var(--border); background: var(--navy); color: #fff; }
+.sidebar-header .title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+.sidebar-header .subtitle { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+
+.search-wrap { padding: 12px 14px 8px; background: var(--surface); border-bottom: 1px solid var(--border); }
+#search { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; outline: none; }
+#search:focus { border-color: var(--navy); }
+#search-hint { font-size: 11px; color: var(--text-soft); margin-top: 6px; }
+.nav-clear { font-size: 11px; color: var(--link); margin-top: 4px; cursor: pointer; display: none; text-decoration: underline; }
+
+.nav { padding: 6px 0 24px; }
+.nav ol { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.nav > ol > li { margin: 4px 0; }
+.nav a { display: block; padding: 5px 18px; color: var(--text); text-decoration: none; border-left: 3px solid transparent; }
+.nav a:hover { background: var(--navy-light); }
+.nav a.active { border-left-color: var(--teal); background: var(--navy-light); font-weight: 600; color: var(--navy); }
+.nav .l1 { font-weight: 600; padding-left: 18px; }
+.nav .l2 { padding-left: 32px; font-size: 12.5px; }
+.nav .hidden { display: none; }
+
+main { max-width: 980px; margin: 0 auto; padding: 32px 48px 80px; }
+@media (max-width: 1100px) { main { padding: 32px 24px 80px; } }
+
+.doc-header { border-bottom: 2px solid var(--navy); padding-bottom: 18px; margin-bottom: 32px; }
+.doc-header h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: -0.02em; color: var(--navy); }
+.doc-header .meta { font-size: 13px; color: var(--text-soft); }
+.doc-header .badges { margin-top: 10px; }
+
+.badge { display: inline-block; padding: 2px 8px; margin-right: 6px; background: var(--navy-light); color: var(--navy); font-size: 11px; font-weight: 600; border-radius: 4px; }
+.badge.ok { background: #d4f4e2; color: #1b6f3c; }
+
+h2 { font-size: 24px; margin-top: 48px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); color: var(--navy); scroll-margin-top: 20px; }
+h3 { font-size: 18px; margin-top: 32px; margin-bottom: 8px; color: var(--navy); scroll-margin-top: 20px; }
+h4 { font-size: 15px; margin-top: 20px; margin-bottom: 6px; color: var(--text); font-weight: 600; }
+p { margin: 0.6em 0; }
+
+table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13.5px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: var(--navy); color: #fff; font-weight: 600; font-size: 12.5px; }
+tr:nth-child(even) td { background: #fafbfc; }
+
+code.inline { background: var(--code-bg); padding: 1px 6px; border-radius: 3px; font-family: "Consolas", "Monaco", monospace; font-size: 0.92em; color: #c7254e; white-space: nowrap; }
+
+.code-block { margin: 14px 0 18px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--code-bg); }
+.code-block .code-header { background: #eef1f4; padding: 6px 14px; font-size: 12px; color: var(--text-soft); border-bottom: 1px solid var(--border); font-family: "Consolas", "Monaco", monospace; display: flex; justify-content: space-between; }
+.code-block .file-path { color: var(--navy); font-weight: 600; }
+.code-block .lines { color: var(--text-soft); font-size: 11px; }
+.code-block pre { margin: 0; padding: 14px 16px; overflow-x: auto; font-family: "Consolas", "Monaco", monospace; font-size: 12.5px; line-height: 1.5; background: var(--code-bg); }
+.code-block pre code { background: transparent; padding: 0; }
+
+.callout { border-left: 4px solid var(--navy); background: var(--navy-light); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; font-size: 13.5px; }
+.callout.warn { border-color: var(--warning); background: #fef9e7; }
+.callout.danger { border-color: var(--danger); background: #fdeceb; }
+.callout.ok { border-color: var(--success); background: #e8f7ec; }
+.callout .label { font-weight: 700; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px; display: block; }
+.callout p:first-of-type { margin-top: 0; }
+.callout p:last-of-type { margin-bottom: 0; }
+
+.diagram { margin: 18px 0; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; text-align: center; }
+.diagram .caption { font-size: 12px; color: var(--text-soft); margin-top: 10px; text-align: center; }
+.mermaid { background: transparent; }
+.mermaid svg { max-width: 100%; height: auto; }
+
+.signature { display: inline-block; padding: 4px 8px; background: #f0f3f7; border-left: 3px solid var(--teal); font-family: "Consolas", "Monaco", monospace; font-size: 12px; margin: 2px 0; }
+.kbd { background: #f0f3f7; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-family: "Consolas", "Monaco", monospace; }
+
+ul, ol { padding-left: 28px; }
+li { margin: 4px 0; }
+
+@page { size: A4; margin: 18mm 18mm 22mm 18mm; }
+@page :first { margin-top: 28mm; }
+
+@media print {
+  .sidebar, .lang-bar, #search-wrap, .nav-clear, .search-wrap { display: none !important; }
+  body, .app { display: block !important; background: white !important; font-size: 10.5pt; }
+  main { margin: 0; padding: 0; max-width: none; }
+  html { scroll-behavior: auto; }
+
+  h2 { page-break-before: always; break-before: page; padding-top: 0; margin-top: 0; }
+  h2:first-of-type { page-break-before: avoid; break-before: auto; }
+  h2, h3, h4 { page-break-after: avoid; break-after: avoid; }
+  h3, h4 { page-break-after: avoid !important; break-after: avoid-page !important; }
+
+  .code-block, .diagram, .callout, .signature { page-break-inside: avoid; break-inside: avoid; }
+  table { page-break-inside: auto; }
+  tr, th, td { page-break-inside: avoid; break-inside: avoid; }
+
+  .code-block { background: white !important; border: 0.5pt solid #999 !important; }
+  .code-block .code-header { background: #f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .code-block pre { font-size: 8.2pt !important; line-height: 1.4 !important; background: white !important; }
+
+  table { font-size: 9.5pt; }
+  th { background: var(--navy) !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  tr:nth-child(even) td { background: #f7f8fa !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .diagram { width: 100% !important; max-width: 100% !important; padding: 0 !important; border: 0 !important; background: white !important; page-break-inside: avoid; break-inside: avoid; margin: 0 0 12pt 0; }
+  .mermaid { width: 100% !important; max-width: 100% !important; }
+  .mermaid svg { width: 100% !important; height: auto !important; max-width: 100% !important; max-height: 215mm !important; display: block !important; margin: 0 auto !important; }
+  .diagram .caption { font-size: 9pt !important; color: #555 !important; margin-top: 6pt; page-break-before: avoid; break-before: avoid; }
+
+  /* Force big-content sections to their own page (prevents orphan headings).
+     Der ERSTE H3 eines Kapitels (4.1, 5.1) ist bewusst NICHT enthalten — der
+     H2 darüber begann bereits eine neue Seite, daher fließt der erste H3
+     direkt dahinter. Sonst bliebe der H2 allein auf einer leeren Seite. */
+  h3#layout, h3#arch-diagram, h3#cross-thread,
+  h3[id^="flow-"],
+  h3#tagselectiondialog, h3#syncreportdialog, h3#schedulersettingsdialog,
+  h3[id^="svc-"]:not(#svc-connection) {
+    page-break-before: always !important;
+    break-before: page !important;
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+  }
+
+  /* Code blocks bleiben atomar — als Ganzes auf die nächste Seite verschoben,
+     wenn sie nicht passen. Der einzige übergroße Auszug (ExecuteBackfill) ist
+     im Markup in zwei Teilblöcke gesplittet, sodass kein Block höher als eine
+     Seite ist. */
+  .code-block { page-break-inside: avoid !important; break-inside: avoid !important; }
+
+  .callout { -webkit-print-color-adjust: exact; print-color-adjust: exact; border-radius: 0 !important; }
+  .callout, .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  p, li { orphans: 3; widows: 3; }
+
+  a { color: var(--navy) !important; text-decoration: none; }
+  a[href^="http"]:after { content: ""; }
+  a[href^="#"]:after { content: ""; }
+
+  code.inline { background: #f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .doc-header { page-break-after: auto; padding-bottom: 12pt; margin-bottom: 18pt; }
+  .doc-header h1 { font-size: 22pt; }
+  .doc-header .meta { font-size: 10pt; }
+  .badge { font-size: 8.5pt; }
+
+  h2 { font-size: 16pt; margin-bottom: 8pt; padding-bottom: 4pt; }
+  h3 { font-size: 13pt; margin-top: 14pt; }
+  h4 { font-size: 11pt; margin-top: 10pt; }
+}
+</style>
+</head>
+
+<body>
+
+<div class="lang-bar">
+  <a href="index.html">EN</a> ·
+  <a href="index.de.html" class="active">DE</a>
+</div>
+
+<div class="app">
+
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="title">HistorianSyncTool</div>
+    <div class="subtitle">Technische Dokumentation</div>
+  </div>
+  <div class="search-wrap">
+    <input id="search" type="text" placeholder="Suchen… (Strg+K)" autocomplete="off">
+    <div id="search-hint">Filtert die Navigation während der Eingabe.</div>
+    <div class="nav-clear" id="nav-clear">Suche zurücksetzen</div>
+  </div>
+
+  <nav class="nav" id="nav">
+    <ol>
+      <li><a class="l1" href="#overview">1. Überblick</a>
+        <ol>
+          <li><a class="l2" href="#purpose">1.1 Zweck</a></li>
+          <li><a class="l2" href="#tech-stack">1.2 Technologie-Stack</a></li>
+          <li><a class="l2" href="#layout">1.3 Verzeichnisstruktur</a></li>
+        </ol>
+      </li>
+
+      <li><a class="l1" href="#architecture">2. Architektur</a>
+        <ol>
+          <li><a class="l2" href="#dual-server">2.1 Dual-Server-Modell</a></li>
+          <li><a class="l2" href="#layers">2.2 Geschichteter Aufbau</a></li>
+          <li><a class="l2" href="#arch-diagram">2.3 Architekturdiagramm</a></li>
+          <li><a class="l2" href="#cross-thread">2.4 UI-Thread / Async-Muster</a></li>
+        </ol>
+      </li>
+
+      <li><a class="l1" href="#flows">3. Datenfluss pro Anwendungsfall</a>
+        <ol>
+          <li><a class="l2" href="#flow-connect">3.1 Verbinden</a></li>
+          <li><a class="l2" href="#flow-browse">3.2 Tags durchsuchen</a></li>
+          <li><a class="l2" href="#flow-read">3.3 Daten lesen</a></li>
+          <li><a class="l2" href="#flow-compare">3.4 Vergleichen</a></li>
+          <li><a class="l2" href="#flow-gap">3.5 Lücken analysieren</a></li>
+          <li><a class="l2" href="#flow-backfill">3.6 Manuelles Backfill</a></li>
+          <li><a class="l2" href="#flow-scheduled">3.7 Geplantes Backfill</a></li>
+        </ol>
+      </li>
+
+      <li><a class="l1" href="#forms">4. Formulare (UI)</a>
+        <ol>
+          <li><a class="l2" href="#mainform">4.1 MainForm</a></li>
+          <li><a class="l2" href="#tagselectiondialog">4.2 TagSelectionDialog</a></li>
+          <li><a class="l2" href="#syncreportdialog">4.3 SyncReportDialog</a></li>
+          <li><a class="l2" href="#schedulersettingsdialog">4.4 SchedulerSettingsDialog</a></li>
+        </ol>
+      </li>
+
+      <li><a class="l1" href="#services">5. Services</a>
+        <ol>
+          <li><a class="l2" href="#svc-connection">5.1 HistorianConnectionService</a></li>
+          <li><a class="l2" href="#svc-data">5.2 HistorianDataService</a></li>
+          <li><a class="l2" href="#svc-gap">5.3 GapAnalysisService</a></li>
+          <li><a class="l2" href="#svc-retry">5.4 RetryHelper</a></li>
+          <li><a class="l2" href="#svc-samplefilter">5.5 SampleFilter</a></li>
+          <li><a class="l2" href="#svc-samplebucketer">5.6 SampleBucketer</a></li>
+          <li><a class="l2" href="#svc-schedule">5.7 ScheduleService</a></li>
+          <li><a class="l2" href="#svc-schedulelog">5.8 ScheduleLogger</a></li>
+        </ol>
+      </li>
+
+      <li><a class="l1" href="#models">6. Models</a></li>
+      <li><a class="l1" href="#ui-controls">7. UI-Steuerelemente</a></li>
+      <li><a class="l1" href="#configuration">8. Konfiguration</a></li>
+      <li><a class="l1" href="#tests">9. Tests</a></li>
+      <li><a class="l1" href="#build">10. Build &amp; Auslieferung</a></li>
+      <li><a class="l1" href="#glossary">11. Glossar</a></li>
+    </ol>
+  </nav>
+</aside>
+
+<main>
+
+<header class="doc-header">
+  <h1>HistorianSyncTool — Technische Dokumentation</h1>
+  <div class="meta">Ein Windows-Forms-Werkzeug zur Synchronisierung zweier GE-Proficy-Historian-Server · .NET Framework 4.8 / C# / x86</div>
+  <div class="badges">
+    <span class="badge ok">Produktionsreif</span>
+  </div>
+</header>
+
+<p>Dieses Dokument beschreibt den Aufbau der HistorianSyncTool-Anwendung, was jede Datei tut und
+wie die wichtigsten Benutzerabläufe von Anfang bis Ende funktionieren. Es richtet sich an
+Entwicklerinnen und Entwickler, die den Code so gut verstehen müssen, dass sie ihn erweitern,
+debuggen oder erklären können.</p>
+
+<p>Verwenden Sie die Seitenleiste zur Navigation oder drücken Sie <span class="kbd">Strg+K</span>, um das
+Inhaltsverzeichnis zu filtern. Für eine druckbare Fassung öffnen Sie <span class="kbd">Datei → Drucken</span>
+in Ihrem Browser — das Druck-Stylesheet blendet die Seitenleiste aus, beginnt jeden Hauptabschnitt
+auf einer neuen Seite und zwingt Diagramme auf volle Seitenbreite.</p>
+
+<h2 id="overview">1. Überblick</h2>
+
+<h3 id="purpose">1.1 Zweck</h3>
+<p>HistorianSyncTool ist eine Desktop-Anwendung, die sich mit zwei GE-Proficy-Historian-Servern
+(einem <strong>Primary</strong> und einem <strong>Secondary</strong>) verbindet und vier
+zusammenhängende Funktionen bietet:</p>
+
+<ol>
+  <li><strong>Tags durchsuchen</strong> — die auf beiden Servern verfügbaren Tags durchsuchen und
+      Messwerte nebeneinander anzeigen.</li>
+  <li><strong>Vergleichen</strong> — einen Tag zwischen beiden Servern zeitstempelgenau vergleichen
+      und unterschiedliche oder fehlende Werte hervorheben.</li>
+  <li><strong>Lücken analysieren</strong> — historische Daten beider Server über ein wählbares
+      Zeitfenster auf Lücken prüfen und Abdeckung in Balken und einem Detail-Grid visualisieren.</li>
+  <li><strong>Backfill</strong> — fehlende Messwerte von einem Server auf den anderen schreiben,
+      entweder manuell (einmalig) oder nach festem Zeitplan (unbeaufsichtigt).</li>
+</ol>
+
+<p>Die Anwendung ist um ein geschichtetes Design herum aufgebaut, das UI, Services und
+Datenmodelle trennt und reine Logik-Helfer als testbare Nahtstellen herauslöst. Der
+Kern der Synchronisation arbeitet mit direktem Zeitstempelvergleich zwischen beiden Servern
+und erfasst dadurch auch isolierte fehlende Samples unabhängig von der Dauer; jeder
+Batch-Schreibvorgang ist zudem an eine Read-after-write-Verifikation gekoppelt.</p>
+
+<h3 id="tech-stack">1.2 Technologie-Stack</h3>
+<table>
+  <thead><tr><th>Komponente</th><th>Detail</th></tr></thead>
+  <tbody>
+    <tr><td>Sprache</td><td>C# 7.3 (Standard für VS 2022 + .NET 4.8)</td></tr>
+    <tr><td>UI-Framework</td><td>Windows Forms (WinForms). Kein WPF, kein XAML.</td></tr>
+    <tr><td>Ziel-Framework</td><td>.NET Framework 4.8</td></tr>
+    <tr><td>Plattformziel</td><td><strong>x86</strong> (erzwungen durch die Proficy-DLL)</td></tr>
+    <tr><td>Externe API</td><td><code class="inline">Proficy.Historian.ClientAccess.API v1.0.0.0</code></td></tr>
+    <tr><td>Test-Framework</td><td>MSTest</td></tr>
+    <tr><td>NuGet-Pakete</td><td><strong>Keine.</strong> Alle Referenzen liegen im GAC oder als lokale Proficy-DLL.</td></tr>
+    <tr><td>IDE</td><td>Visual Studio 2022 (empfohlen) oder VS Code mit C# Dev Kit</td></tr>
+    <tr><td>Build-Ausgabe</td><td><code class="inline">bin\Release\HistorianSyncTool.exe</code> + Proficy-DLL</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <span class="label">⚠ Plattform-Festlegung</span>
+  Ändern Sie das Plattformziel nicht auf AnyCPU oder x64. Die Proficy-ClientAccess-DLL ist als
+  MSIL markiert, wird aber in einen 32-Bit-Hostprozess geladen und schlägt in einem
+  64-Bit-Prozess fehl.
+</div>
+
+<h3 id="layout">1.3 Verzeichnisstruktur</h3>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Repository-Wurzel</span></div>
+<pre><code>HistorianClientAccessConcept_v2/
+├── CLAUDE.md                       ← Projektübersicht für KI-Werkzeuge
+├── HistorianSyncTool.sln           ← VS-Solution (2 Projekte)
+├── HistorianSyncTool.csproj        ← Hauptanwendung
+├── app.config                      ← Laufzeit-Stellschrauben
+├── Program.cs                      ← Einstiegspunkt
+│
+├── Forms/                          ← WinForms-Formulare und -Dialoge
+│   ├── MainForm.cs                 ← das Anwendungsformular
+│   ├── MainForm.Designer.cs        ← Steuerelement-Deklarationen + Layout
+│   ├── TagSelectionDialog.cs       ← Pre-Backfill: Tags auswählen + Statistiken
+│   ├── SyncReportDialog.cs         ← Post-Backfill: Ergebnisse + CSV/TXT-Export
+│   └── SchedulerSettingsDialog.cs  ← unbeaufsichtigten Plan konfigurieren
+│
+├── Services/                       ← Reine Domänenlogik, keine UI-Abhängigkeiten
+│   ├── HistorianConnectionService.cs   ← Lebenszyklus beider ServerConnection-Instanzen
+│   ├── HistorianDataService.cs         ← alle IData/ITags-Aufrufe (Lesen, Schreiben, Verifikation)
+│   ├── GapAnalysisService.cs           ← Lückenerkennung, Schwellwert, Batch-Planung
+│   ├── RetryHelper.cs                  ← reines Retry-mit-Backoff (getestet)
+│   ├── SampleFilter.cs                 ← Parsen + Halboffenes-Intervall-Clipping (getestet)
+│   ├── SampleBucketer.cs               ← Samples in Schreib-Buckets gruppieren (getestet)
+│   ├── ScheduleService.cs              ← 15-s-Polling-Timer, Next-Run-Berechnung
+│   └── ScheduleLogger.cs               ← monatlich rollierende Log-Datei
+│
+├── Models/                         ← Einfache Datenklassen
+│   ├── GapAnalysisResult.cs        ← Abdeckung, Lücken, Sample-Zeiten
+│   ├── GapWindow.cs                ← eine Lücke = Start/End + Batches
+│   ├── GapBatch.cs                 ← ein Bucket innerhalb einer Lücke
+│   ├── SyncRunReport.cs            ← Post-Backfill-Aggregat + TagBackfillResult
+│   └── ServerStats.cs              ← optionales Server-Info-DTO
+│
+├── UI/                             ← Theme + benutzerdefinierte Steuerelemente
+│   ├── AppTheme.cs                 ← Farb-Tokens, Schriftarten, Größenkonstanten
+│   └── Controls/
+│       ├── FlatButton.cs           ← Button mit Style-Enum
+│       ├── CoverageBar.cs          ← interaktiver grün/roter Balken mit Hover-Tooltips
+│       ├── SectionHeader.cs        ← Navy-blauer Abschnitts-Trenner
+│       ├── ConnectionDot.cs        ← kleiner Status-Kreis
+│       └── CollapsiblePanel.cs     ← ein- und ausklappbares Log/Write-Data-Panel
+│
+├── HistorianSyncTool.Tests/        ← MSTest-Projekt (ohne Proficy)
+│   ├── GapAnalysisServiceTests.cs  ← Median, Schwellwert, Batch-Planung
+│   ├── RetryHelperTests.cs         ← Backoff, Sleep-Injection, Exception-Wrapping
+│   ├── SampleFilterTests.cs        ← Parsen + Halboffenes-Intervall-Semantik
+│   └── SampleBucketerTests.cs      ← Bucket-Reset-Verhalten, dichte Cluster
+│
+├── Properties/                     ← Persistierte Benutzereinstellungen
+├── _backup/                        ← Nur als Referenz archiviert (NICHT kompiliert)
+├── docs/                           ← DIESES DOKUMENT (index.html + index.de.html)
+├── logs/                           ← (zur Laufzeit erzeugt) Scheduler-Audit-Log
+└── .claude/rules/                  ← thematische Regel-Dateien für KI-Kontext
+</code></pre>
+</div>
+
+<h2 id="architecture">2. Architektur</h2>
+
+<h3 id="dual-server">2.1 Dual-Server-Modell</h3>
+<p>Die Anwendung arbeitet stets gegen zwei Historian-Instanzen. Sie werden in der API symmetrisch
+behandelt, haben aber unterschiedliche Rollen in der Praxis:</p>
+
+<table>
+  <thead><tr><th>Rolle</th><th>Feld</th><th>Konvention</th></tr></thead>
+  <tbody>
+    <tr><td>Primary</td><td><code class="inline">_connections.Primary</code></td><td>Maßgebliche Datenquelle</td></tr>
+    <tr><td>Secondary</td><td><code class="inline">_connections.Secondary</code></td><td>Redundanter / Spiegel-Server</td></tr>
+  </tbody>
+</table>
+
+<p>Beide werden in <code class="inline">ServerConnection</code>-Objekten verpackt, die dem
+<a href="#svc-connection">HistorianConnectionService</a> gehören. Die meisten Operationen
+benötigen beide Verbindungen. Der Secondary-Hostname wird konventionell vom Primary abgeleitet:
+Endet der Primary-Hostname auf <code class="inline">PC2</code>, wird dieses Suffix beim Secondary
+entfernt; andernfalls wird <code class="inline">PC2</code> angehängt.</p>
+
+<h3 id="layers">2.2 Geschichteter Aufbau</h3>
+<p>Der Code ist in vier konzeptuellen Schichten organisiert. Die Abhängigkeitsregel ist
+einseitig: <strong>Forms hängen von Services ab, Services von Models</strong>. Services
+referenzieren niemals WinForms-Steuerelemente — keine Service-Datei enthält
+<code class="inline">using System.Windows.Forms;</code>.</p>
+
+<table>
+  <thead><tr><th>Schicht</th><th>Verzeichnis</th><th>Verantwortung</th></tr></thead>
+  <tbody>
+    <tr><td>Einstieg</td><td><code class="inline">Program.cs</code></td><td>Bootstrap von WinForms, MainForm instanziieren</td></tr>
+    <tr><td>Forms (UI)</td><td><code class="inline">Forms/</code> + <code class="inline">UI/</code></td><td>WinForms-Formulare, Steuerelemente, Theme, Event-Handler</td></tr>
+    <tr><td>Services</td><td><code class="inline">Services/</code></td><td>Verbindungs-Lebenszyklus, Historian-API, Lückenanalyse, Scheduling</td></tr>
+    <tr><td>Models</td><td><code class="inline">Models/</code></td><td>Einfache Datenklassen (kein Verhalten außer berechneten Eigenschaften)</td></tr>
+  </tbody>
+</table>
+
+<h3 id="arch-diagram">2.3 Architekturdiagramm</h3>
+
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+    USR((Benutzer))
+
+    subgraph UI [Forms / UI-Schicht]
+        direction TB
+        MF[MainForm]
+        DLG["Dialoge:<br/>TagSelectionDialog<br/>SyncReportDialog<br/>SchedulerSettingsDialog"]
+        CTRL["Eigene Steuerelemente:<br/>FlatButton, CoverageBar,<br/>SectionHeader,<br/>ConnectionDot, CollapsiblePanel"]
+    end
+
+    subgraph SVC [Service-Schicht]
+        direction TB
+        CONN[HistorianConnectionService]
+        DATA[HistorianDataService]
+        GAP[GapAnalysisService]
+        SCH[ScheduleService]
+        HLP["Reine Helfer:<br/>RetryHelper, SampleFilter,<br/>SampleBucketer, ScheduleLogger"]
+    end
+
+    subgraph MOD [Models]
+        direction TB
+        M["GapAnalysisResult, GapWindow, GapBatch<br/>SyncRunReport, TagBackfillResult, ServerStats"]
+    end
+
+    PROFICY[("Proficy ClientAccess API<br/>(net.tcp WCF, Port 13000)")]
+    SRV[("Historian-Server<br/>Primary + Secondary")]
+
+    USR --> MF
+    MF --> DLG
+    MF --> CTRL
+    MF --> CONN
+    MF --> DATA
+    MF --> GAP
+    MF --> SCH
+    DATA --> HLP
+    SCH --> HLP
+    CONN --> PROFICY
+    DATA --> PROFICY
+    PROFICY <--> SRV
+    GAP -.-> M
+    MF -.-> M
+
+    classDef userL fill:#FFF7E0,stroke:#8a5a06,color:#2C3E50,stroke-width:2px
+    classDef uiL fill:#E8F0FA,stroke:#1E3A5F,color:#1E3A5F,stroke-width:2px
+    classDef svcL fill:#E4F7EF,stroke:#1ABC9C,color:#16A085,stroke-width:2px
+    classDef modL fill:#F5EFFA,stroke:#7F5AB6,color:#5B3E8A,stroke-width:2px
+    classDef extL fill:#FDEAEA,stroke:#E74C3C,color:#922B21,stroke-width:2px
+
+    class USR userL
+    class MF,DLG,CTRL uiL
+    class CONN,DATA,GAP,SCH,HLP svcL
+    class M modL
+    class PROFICY,SRV extL
+</pre>
+<div class="caption">Abbildung 2.1 — Architektur auf oberster Ebene. Die UI spricht mit Services; Services erzeugen Models und rufen die Proficy-API auf. Die vier extrahierten reinen Helfer (Retry, SampleFilter, SampleBucketer, ScheduleLogger) sind ohne die Proficy-DLL unit-testbar.</div>
+</div>
+
+<h3 id="cross-thread">2.4 UI-Thread / Async-Muster</h3>
+<p>Alle länger laufenden Operationen folgen demselben Muster, um die UI reaktionsfähig zu halten
+und Wiedereintrittsprobleme zu vermeiden:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Forms/MainForm.cs</span><span class="lines">kanonisches Muster</span></div>
+<pre><code class="language-csharp">private async void btnSomething_Click(object sender, EventArgs e)
+{
+    SetBusy(true, "Was ich tue…");      // deaktiviert Aktion-Buttons, zeigt Marquee
+    try
+    {
+        ResetCts();                      // disposed vorherigen CTS, allokiert neu
+        var token = _cts.Token;
+
+        // ALLE UI-Werte vorab erfassen, damit der Worker keine Controls berührt
+        DateTime from = dtpStart.Value;
+        DateTime to   = dtpEnd.Value;
+        string   tag  = cboPrimary.Text;
+
+        var result = await Task.Run(() =&gt;
+        {
+            token.ThrowIfCancellationRequested();
+            return _data.ReadRawInRange(_connections.Primary, tag, from, to);
+        }, token);
+
+        // Zurück im UI-Thread: Controls direkt aktualisieren
+        UpdateGrid(result);
+        SetStatus($"{result.Count} Samples gelesen.");
+    }
+    catch (OperationCanceledException) { SetStatus("Abgebrochen."); }
+    catch (Exception ex)                { SetStatus($"Fehlgeschlagen: {ex.Message}", true); }
+    finally { SetBusy(false); }
+}</code></pre>
+</div>
+
+<div class="callout">
+  <span class="label">Regel</span>
+  Worker-Code innerhalb von <code class="inline">Task.Run</code> darf <strong>niemals</strong> direkt auf
+  <code class="inline">Control</code>-Eigenschaften zugreifen. UI-Werte werden vor
+  <code class="inline">Task.Run</code> in lokale Variablen kopiert; Updates zurück an die UI laufen über
+  <code class="inline">Invoke</code> (Status- und Log-Helfer übernehmen das intern).
+</div>
+
+<p>Der <code class="inline">ResetCts()</code>-Helfer existiert, weil jede länger laufende Operation eine
+eigene <code class="inline">CancellationTokenSource</code> benötigt. Ohne Disposal würden wiederholte
+Operationen CTS-Instanzen lecken, die finalisierbare Ressourcen halten:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Forms/MainForm.cs</span></div>
+<pre><code class="language-csharp">private void ResetCts()
+{
+    try { _cts?.Dispose(); } catch { }
+    _cts = new CancellationTokenSource();
+}</code></pre>
+</div>
+
+<h2 id="flows">3. Datenfluss pro Anwendungsfall</h2>
+
+<p>Die sieben wichtigsten Benutzerabläufe folgen demselben Architekturmuster: Ein Event-Handler
+in <a href="#mainform">MainForm</a> erfasst den UI-Zustand, gibt die Arbeit per
+<code class="inline">Task.Run</code> an einen Service ab und schreibt das Ergebnis zurück. Jedes Diagramm
+zeigt die Aufrufabfolge vom Benutzerklick über den Historian-Server bis zurück.</p>
+
+<h3 id="flow-connect">3.1 Verbinden</h3>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as Benutzer
+    participant MF as MainForm
+    participant CS as HistorianConnectionService
+    participant SC as ServerConnection
+    participant SRV as Historian-Server
+
+    U->>MF: Klick auf "Connect"
+    MF->>MF: SetBusy(true), ResetCts()
+    MF->>CS: ConnectPrimary(primaryHost)
+    CS->>SC: new ServerConnection(props)
+    CS->>SC: Connect()
+    SC->>SRV: net.tcp://host:13000
+    SRV-->>SC: verbunden
+    SC-->>CS: ok
+    CS-->>MF: kehrt zurück
+    Note over MF: Wiederholung für Secondary
+    MF->>MF: UpdateConnectionStatus()
+    MF->>MF: SetBusy(false)
+</pre>
+<div class="caption">Abbildung 3.1 — Verbindungsablauf. Der Secondary-Hostname wird vom Primary abgeleitet, wenn das Feld leer ist (PC2 anhängen oder entfernen).</div>
+</div>
+
+<p>Quelle: <code class="inline">Forms/MainForm.cs · btnConnect_Click</code> (Zeile ~606) und
+<code class="inline">Services/HistorianConnectionService.cs</code>.</p>
+
+<h3 id="flow-browse">3.2 Tags durchsuchen</h3>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as Benutzer
+    participant MF as MainForm
+    participant DS as HistorianDataService
+    participant SC as ServerConnection
+    participant SRV as Historian-Server
+
+    U->>MF: Klick auf "Browse Tags"
+    MF->>MF: Maske aus txtTagnameFilter.Text erfassen
+    MF->>DS: BrowseTags(Primary, mask)
+    activate DS
+    DS->>DS: RetryHelper.Retry(maxRetries)
+    loop solange ITags.Query true liefert
+        DS->>SC: ITags.Query(ref params, out page)
+        SC->>SRV: Tag-Abfrage (PageSize=100)
+        SRV-->>SC: Seite mit Tags
+        SC-->>DS: page
+        DS->>DS: allTags.AddRange(page)
+    end
+    DS->>DS: allTags.AddRange(page)
+    Note right of DS: Letzte Seite wird<br/>NACH Schleifen-Ende geliefert
+    DS-->>MF: List&lt;Tag&gt;
+    deactivate DS
+    Note over MF: Wiederholung für Secondary
+    MF->>MF: cboPrimary.DataSource = priTags
+</pre>
+<div class="caption">Abbildung 3.2 — Tags durchsuchen. Die paginierte Proficy-Abfrage verlässt die While-Schleife auf der letzten Seite <em>nachdem</em> sie diese gefüllt hat — ein zweites <code>AddRange</code> ist daher erforderlich.</div>
+</div>
+
+<h3 id="flow-read">3.3 Daten lesen</h3>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as Benutzer
+    participant MF as MainForm
+    participant DS as HistorianDataService
+    participant SF as SampleFilter
+    participant SC as ServerConnection
+    participant SRV as Historian-Server
+
+    U->>MF: Tag in cboPrimary auswählen
+    Note over MF: löst automatisch ReadPrimaryData() aus
+    MF->>MF: from, to, tag erfassen
+    MF->>DS: ReadRawInRange(conn, tag, from, to)
+    activate DS
+    DS->>DS: RetryHelper.Retry
+    loop Pagination
+        DS->>SC: IData.Query(RawByTimeQuery)
+        SC->>SRV: Roh-Abfrage
+        SRV-->>SC: DataSet-Seite
+        SC-->>DS: page
+        DS->>DS: all.AddRange(page)
+    end
+    DS->>DS: all.AddRange(page)
+    DS->>SF: ParseAndClip(stream, start, end)
+    SF-->>DS: Liste typisierter Tupel
+    DS-->>MF: samples
+    deactivate DS
+    MF->>MF: _primaryRows = SamplesToGridRows(samples)
+    MF->>MF: gridPrimary.RowCount = count
+</pre>
+<div class="caption">Abbildung 3.3 — Daten lesen. <code>ReadRawInRange</code> wendet einen halboffenen Filter <code>[start, end)</code> über <a href="#svc-samplefilter">SampleFilter</a> an. Das Grid läuft im WinForms-<em>Virtual Mode</em>, sodass große Listen keine Zeile pro Sample allokieren.</div>
+</div>
+
+<h3 id="flow-compare">3.4 Vergleichen</h3>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as Benutzer
+    participant MF as MainForm
+    participant DS as HistorianDataService
+
+    U->>MF: Klick auf "Compare"
+    MF->>MF: Validierung: beide verbunden, beide Tags ausgewählt
+    par parallel lesen
+        MF->>DS: ReadRawInRange(Primary, priTag, from, to)
+        DS-->>MF: priSamples
+    and
+        MF->>DS: ReadRawInRange(Secondary, secTag, from, to)
+        DS-->>MF: secSamples
+    end
+    MF->>MF: SortedDictionary nach Time
+    Note over MF: priSamples → Pri.Value setzen<br/>secSamples → Sec.Value setzen
+    MF->>MF: Klassifizieren spacer / extra / mismatch / equal
+    MF->>MF: gridPrimary + gridSecondary neu zeichnen
+    Note over MF: RowPrePaint färbt Zeilen<br/>nach IsSpacer / IsExtra / IsMismatch
+</pre>
+<div class="caption">Abbildung 3.4 — Vergleichen. Beide Sample-Listen werden geladen und nach Zeitstempel in einem sortierten Wörterbuch ausgerichtet. Fehlende Zeilen rendern als graue Spacer; abweichende Werte erhalten einen warm-gelben Hintergrund.</div>
+</div>
+
+<h3 id="flow-gap">3.5 Lücken analysieren</h3>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as Benutzer
+    participant MF as MainForm
+    participant DS as HistorianDataService
+    participant GS as GapAnalysisService
+
+    U->>MF: Klick auf "Analyze Gaps"<br/>(oder Datum/Tag-Änderung → 500ms Debounce)
+    MF->>MF: priTag, secTag (Fallback HistSync)
+
+    par pro Tag Sample-Zeiten
+        MF->>DS: ReadRaw(Primary, priTag, from)
+        DS-->>MF: priOnPrimary
+    and
+        MF->>DS: ReadRaw(Secondary, secTag, from)
+        DS-->>MF: secOnSecondary
+    end
+    par Daten der jeweils anderen Seite für Feasibility
+        MF->>DS: ReadRaw(Secondary, priTag, from)
+        DS-->>MF: priOnSecondary
+    and
+        MF->>DS: ReadRaw(Primary, secTag, from)
+        DS-->>MF: secOnPrimary
+    end
+
+    MF->>GS: Analyze(priOnPrimary, priHost, from, to)
+    activate GS
+    GS->>GS: Leer? → ganze Periode als Lücke, zurück
+    GS->>GS: deltas = aufeinanderfolgende Intervalle
+    GS->>GS: median = Median(deltas)
+    GS->>GS: threshold = max(median × 1.5, MinGapDuration)
+    GS->>GS: führende + interne + nachlaufende Lücken erkennen
+    GS->>GS: PlanBatches je Lücke
+    GS-->>MF: GapAnalysisResult
+    deactivate GS
+    Note over MF: Dasselbe für Secondary
+    MF->>GS: MarkBackfillFeasibility (binäre Suche)
+    GS-->>MF: CanBackfill-Flags
+
+    MF->>MF: UpdateGapAnalysisUI(from, to)
+    Note over MF: CoverageBar + gridGaps + Labels
+</pre>
+<div class="caption">Abbildung 3.5 — Lücken analysieren. Der Schwellwert kombiniert einen relativen Median-Multiplikator mit einer absoluten Untergrenze (Standard 120 s), um Falsch-Positive bei Deadband-aufgezeichneten Tags zu unterdrücken.</div>
+</div>
+
+<div class="callout warn">
+  <span class="label">Hinweis</span>
+  Die Lückenanalyse dient <strong>nur der UI-Anzeige</strong>. Die Backfill-Planung konsultiert
+  <code class="inline">CanBackfill</code> nicht — siehe <a href="#flow-backfill">3.6</a> für den
+  Direct-Comparison-Ansatz, der auch isolierte fehlende Samples unterhalb der
+  Lücken-Mindestdauer erfasst.
+</div>
+
+<h3 id="flow-backfill">3.6 Manuelles Backfill</h3>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as Benutzer
+    participant MF as MainForm
+    participant TDS as TagSelectionDialog
+    participant DS as HistorianDataService
+    participant SB as SampleBucketer
+    participant RD as SyncReportDialog
+
+    U->>MF: Klick auf "Copy to Secondary"
+    MF->>TDS: new TagSelectionDialog(…)
+    TDS->>DS: ReadRawInRange (beide Server, pro Tag, Hintergrund)
+    DS-->>TDS: srcSamples + tgtSamples
+    TDS->>TDS: Direct Diff → "Will copy"-Zahl
+    TDS-->>U: Modal: Tag-Grid mit Statistiken pro Zeile
+    U->>TDS: Tags auswählen → "Start Backfill"
+    TDS-->>MF: SelectedTags
+
+    MF->>MF: ExecuteBackfill(…)
+    activate MF
+    loop für jeden Tag
+        MF->>DS: ReadRawInRange(source, tag, from, to)
+        MF->>DS: ReadRawInRange(target, tag, from, to)
+        MF->>MF: tgtTicks = HashSet der Ziel-Ticks
+        MF->>MF: missing = src wobei Tick NICHT in tgtTicks
+        MF->>SB: GroupByBucket(missing, BatchSize)
+        SB-->>MF: Liste von Batches
+        loop pro Batch
+            MF->>DS: WriteFloatSamplesWithQuality(target, …)
+            DS-->>MF: errors
+            MF->>DS: VerifyWrite(target, t0-1s, tN+1s, expected)
+            DS-->>MF: (expected, actual)
+            alt writeOk UND verifyOk
+                MF->>MF: BatchesSucceeded++
+            else
+                MF->>MF: BatchesFailed++
+            end
+        end
+    end
+    deactivate MF
+    MF->>RD: new SyncReportDialog(report)
+    RD-->>U: Ergebnisse pro Tag + CSV/TXT-Export
+    MF->>MF: AutoRefreshAfterBackfill()
+</pre>
+<div class="caption">Abbildung 3.6 — Manuelles Backfill. Der Diff arbeitet pro Zeitstempel (nicht pro Lückenfenster), sodass auch isolierte fehlende Samples unterhalb der Lücken-Mindestdauer kopiert werden. Jeder Batch wird sowohl an den Schreiberfolg als auch an die Read-after-write-Verifikation gekoppelt.</div>
+</div>
+
+<h3 id="flow-scheduled">3.7 Geplantes Backfill</h3>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant T as Timer<br/>(15-s-Polling)
+    participant SS as ScheduleService
+    participant MF as MainForm
+    participant DS as HistorianDataService
+    participant SL as ScheduleLogger
+    participant FS as Log-Datei
+
+    Note over T: Konfiguriert via<br/>SchedulerSettingsDialog
+    T->>SS: Tick (alle 15 s)
+    SS->>SS: enabled? running? Zeit für NextRunUtc?
+    SS->>MF: RunScheduledBackfillAsync()
+
+    activate MF
+    MF->>MF: Beide Server verbunden? nicht busy?
+    MF->>SL: "Scheduled run started"
+    SL->>FS: Zeile anhängen
+    MF->>MF: evalFrom = now - WindowHours
+
+    par beide Server durchsuchen
+        MF->>DS: BrowseTags(Primary, filter)
+        DS-->>MF: priTags
+    and
+        MF->>DS: BrowseTags(Secondary, filter)
+        DS-->>MF: secTags
+    end
+    MF->>MF: sharedTags = Schnittmenge
+
+    alt Richtung enthält P→S
+        MF->>MF: ExecuteBackfill(P→S, unattended=true)
+        MF->>SL: "P→S tags=N batches=… samples=…"
+        SL->>FS: Zeile anhängen
+    end
+    alt Richtung enthält S→P
+        MF->>MF: ExecuteBackfill(S→P, unattended=true)
+        MF->>SL: "S→P …"
+        SL->>FS: Zeile anhängen
+    end
+
+    MF->>MF: AutoRefreshAfterBackfill()
+    MF->>MF: LastRunUtc = UtcNow (persistiert)
+    deactivate MF
+
+    SS->>SS: ComputeNextRun()
+    SS->>MF: StatusChanged-Event
+    MF->>MF: lblSchedule = "Next run: HH:mm"
+</pre>
+<div class="caption">Abbildung 3.7 — Geplantes Backfill. Der Polling-Timer feuert alle 15 Sekunden, der eigentliche Lauf erfolgt aber nur, wenn die Next-Run-Zeit erreicht ist und die Gating-Bedingungen erfüllt sind. Jeder Lauf schreibt eine Audit-Zeile pro Richtung in <code>logs/schedule-YYYY-MM.log</code>.</div>
+</div>
+
+<h2 id="forms">4. Formulare (UI)</h2>
+
+<h3 id="mainform">4.1 MainForm</h3>
+<p><strong>Datei:</strong> <code class="inline">Forms/MainForm.cs</code> (~1800 Zeilen) +
+<code class="inline">Forms/MainForm.Designer.cs</code> (Steuerelement-Layout).</p>
+
+<p>Das einzige Top-Level-<code class="inline">Form</code> der Anwendung. Hält die Service-Instanzen und
+koordiniert jede Benutzeraktion. Die Designer-Datei definiert das Layout der Steuerelemente
+(Statusleiste, linke Seitenleiste mit drei Abschnitten, mittlerer Bereich mit Grids und Buttons,
+rechtes Panel mit Lückenanalyse). Die andere Datei enthält Event-Handler und Orchestrierung.</p>
+
+<h4>Felder (Lebenszyklus und Zustand)</h4>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Forms/MainForm.cs</span><span class="lines">Z20–55</span></div>
+<pre><code class="language-csharp">// ── Services ───────────────────────────────────────────────────────────────
+private readonly HistorianConnectionService _connections = new HistorianConnectionService();
+private readonly HistorianDataService       _data;
+private readonly GapAnalysisService         _gapAnalysis = new GapAnalysisService();
+
+// ── Gap-Analyse-Zustand ────────────────────────────────────────────────────
+private GapAnalysisResult _lastPrimaryResult;
+private GapAnalysisResult _lastSecondaryResult;
+
+// ── Cancellation ───────────────────────────────────────────────────────────
+private CancellationTokenSource _cts;
+private bool _isBusy;
+
+// ── Backing-Daten für Virtual Mode ─────────────────────────────────────────
+private List&lt;GridRow&gt; _primaryRows   = new List&lt;GridRow&gt;();
+private List&lt;GridRow&gt; _secondaryRows = new List&lt;GridRow&gt;();
+
+// ── Compare-Zustand ────────────────────────────────────────────────────────
+private bool _isCompareMode;
+private List&lt;(DateTime Time, float Value, double Quality)&gt; _rawPrimarySamples;
+private List&lt;(DateTime Time, float Value, double Quality)&gt; _rawSecondarySamples;
+
+// ── Auto-Analyze-Debounce ──────────────────────────────────────────────────
+private System.Windows.Forms.Timer _gapAutoAnalyzeTimer;
+
+// ── Unbeaufsichtigter Scheduler ────────────────────────────────────────────
+private ScheduleService _schedule;</code></pre>
+</div>
+
+<h4>Wichtige Methoden</h4>
+<table>
+  <thead><tr><th>Methode</th><th>Zeile</th><th>Zweck</th></tr></thead>
+  <tbody>
+    <tr><td><code class="inline">btnConnect_Click</code></td><td>~606</td><td>Primary + Secondary verbinden</td></tr>
+    <tr><td><code class="inline">btnBrowseTags_Click</code></td><td>~643</td><td>Beide Server durchsuchen, Combos füllen</td></tr>
+    <tr><td><code class="inline">ReadPrimaryData / ReadSecondaryData</code></td><td>~761 / ~810</td><td>Wird vom Read-Button und Combo geteilt</td></tr>
+    <tr><td><code class="inline">btnCompare_Click</code></td><td>~842</td><td>Richtet beide Samples nach Zeitstempel aus</td></tr>
+    <tr><td><code class="inline">RunGapAnalysis</code></td><td>~1525</td><td>Per-Tag-Lückenanalyse + Feasibility</td></tr>
+    <tr><td><code class="inline">ExecuteBackfill</code></td><td>~1037</td><td>Kern: Direct-Comparison-Backfill</td></tr>
+    <tr><td><code class="inline">RunScheduledBackfillAsync</code></td><td>~1339</td><td>Headless-Callback für ScheduleService</td></tr>
+    <tr><td><code class="inline">AutoRefreshAfterBackfill</code></td><td>~1634</td><td>Erneute Lückenanalyse + Daten-Grids neu lesen</td></tr>
+    <tr><td><code class="inline">SetBusy / SetStatus / Log</code></td><td>~335</td><td>Thread-sichere UI-Helfer (InvokeRequired)</td></tr>
+    <tr><td><code class="inline">ResetCts</code></td><td>—</td><td>Disposed alte CTS und legt neue an</td></tr>
+  </tbody>
+</table>
+
+<h4>Der Kern von ExecuteBackfill (direkter Zeitstempelvergleich)</h4>
+<p>Dies ist die wichtigste Methode der Anwendung. Sie verwendet <strong>keine</strong>
+Lückenfenster — sie liest die Samples beider Server über die volle Auswertungsperiode und
+kopiert die Zeitstempel, die auf der Quelle vorhanden, aber auf dem Ziel fehlen. So werden
+auch isolierte fehlende Samples erkannt, die eine intervallbasierte Lückenerkennung
+übersehen würde.</p>
+
+<p><strong>Schritt 1</strong> — beide Server lesen, den Diff der fehlenden Zeitstempel
+berechnen und die fehlenden Samples in Schreib-Batches gruppieren:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Forms/MainForm.cs</span><span class="lines">ExecuteBackfill — Diff &amp; Gruppierung</span></div>
+<pre><code class="language-csharp">// Beide Server für die volle Auswertungsperiode lesen
+var srcData = _data.ReadRawInRange(sourceConn, tag, evalFrom, evalTo);
+var tgtData = _data.ReadRawInRange(targetConn, tag, evalFrom, evalTo);
+
+// Direkter Diff: Zeitstempel auf Quelle, aber nicht auf Ziel
+var tgtTicks = new HashSet&lt;long&gt;(tgtData.Select(s =&gt; s.Time.Ticks));
+var missing = srcData
+    .Where(s =&gt; !tgtTicks.Contains(s.Time.Ticks))
+    .OrderBy(s =&gt; s.Time)
+    .ToList();
+
+if (missing.Count == 0)
+{
+    Log($"  {tag}: bereits synchron ({srcData.Count}/{tgtData.Count}).");
+    continue;
+}
+
+// Fehlende Samples nach Bucket-Dauer gruppieren
+var batches = SampleBucketer.GroupByBucket(missing, batchSize);</code></pre>
+</div>
+
+<p><strong>Schritt 2</strong> — jeden Batch schreiben (unter Erhalt der Qualität pro Sample)
+und vor der Erfolgszählung mit einem Read-after-write-Check verifizieren:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Forms/MainForm.cs</span><span class="lines">ExecuteBackfill — Schreiben &amp; Verifikation</span></div>
+<pre><code class="language-csharp">foreach (var batchSamples in batches)
+{
+    var times     = batchSamples.Select(s =&gt; s.Time).ToArray();
+    var values    = batchSamples.Select(s =&gt; s.Value).ToArray();
+    var qualities = batchSamples.Select(s =&gt;
+        s.Quality &gt;= 100.0 ? DataQuality.Good :
+        s.Quality &gt; 0      ? DataQuality.Uncertain :
+                             DataQuality.Bad).ToArray();
+
+    var errors = _data.WriteFloatSamplesWithQuality(targetConn, tag, times, values, qualities);
+    bool writeOk = errors.Count == 0;
+
+    // Verifikation: Zeitbereich des Batches erneut lesen. ±1 s erweitern, um die
+    // Sekunden-genaue Rundung des Historian zu tolerieren (ein Schreiben bei
+    // 12:54:30.123 wird als 12:54:30 gespeichert — eine tick-enge Abfrage ab
+    // .123 fände nichts).
+    bool verifyOk = true;
+    if (writeOk)
+    {
+        DateTime vStart = times[0].AddSeconds(-1);
+        DateTime vEnd   = times[times.Length - 1].AddSeconds(1);
+        var verify = _data.VerifyWrite(targetConn, tag, vStart, vEnd, times.Length);
+        if (verify.Actual &lt; verify.Expected)
+        {
+            verifyOk = false;
+            tagResult.Errors.Add($"Batch {batchIdx}: Verify-Mismatch — " +
+                                 $"geschrieben {verify.Expected}, gefunden {verify.Actual}");
+        }
+    }
+
+    if (writeOk &amp;&amp; verifyOk)
+    {
+        tagResult.BatchesSucceeded++;
+        tagResult.SamplesWritten += batchSamples.Count;
+    }
+    else
+    {
+        tagResult.BatchesFailed++;
+    }
+}</code></pre>
+</div>
+
+<div class="callout">
+  <span class="label">Warum direkter Vergleich</span>
+  Ein Backfill nach Lückenfenstern übersieht <strong>isolierte</strong> fehlende Samples —
+  eine 20-Sekunden-Lücke auf dem Secondary, während der Primary einen Sample hat. Die
+  <code class="inline">MinimumGapSeconds</code>-Untergrenze (nötig zur Unterdrückung von Deadband-Rauschen)
+  würde auch echte isolierte Lücken unterdrücken. Der direkte Zeitstempel-Diff hat keine
+  Untergrenze; er kopiert exakt das Fehlende — unabhängig von der Dauer. Eine
+  Referenz-Momentaufnahme der älteren lückenfensterbasierten Implementierung liegt unter
+  <code class="inline">_backup/batch-based-backfill-phase6/</code>, falls eine künftige Änderung jemals
+  einen Rollback erfordert.
+</div>
+
+<h4>Unbeaufsichtigter Modus</h4>
+<p>Drei optionale Parameter erlauben es, dass dieselbe Methode auch geplante Läufe antreibt:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Forms/MainForm.cs</span><span class="lines">ExecuteBackfill-Signatur</span></div>
+<pre><code class="language-csharp">private async Task ExecuteBackfill(
+    GapAnalysisResult gapResult,
+    ServerConnection sourceConn,
+    ServerConnection targetConn,
+    string sourceLabel,
+    string targetLabel,
+    List&lt;string&gt; tagsToBackfill,
+    DateTime? evalFromOverride = null,   // rollendes Scheduler-Fenster
+    DateTime? evalToOverride = null,
+    bool unattended = false)             // modalen SyncReportDialog überspringen</code></pre>
+</div>
+
+<h3 id="tagselectiondialog">4.2 TagSelectionDialog</h3>
+<p><strong>Datei:</strong> <code class="inline">Forms/TagSelectionDialog.cs</code></p>
+<p>Modaler Dialog vor einem manuellen Backfill. Zeigt nur Tags, die auf beiden Servern existieren
+(Schnittmenge), und berechnet Pre-Flight-Statistiken pro Tag im Hintergrund-Thread.</p>
+
+<table>
+  <thead><tr><th>Spalte</th><th>Quelle</th></tr></thead>
+  <tbody>
+    <tr><td>✓ (Checkbox)</td><td>Benutzerauswahl</td></tr>
+    <tr><td>Tag</td><td>Shared-Tag-Schnittmenge</td></tr>
+    <tr><td>Source samples</td><td>Anzahl aus <code class="inline">ReadRawInRange(sourceConn, …)</code></td></tr>
+    <tr><td>Target samples</td><td>Anzahl aus <code class="inline">ReadRawInRange(targetConn, …)</code></td></tr>
+    <tr><td>Will copy</td><td>Direkter Diff: Zeitstempel auf Quelle, nicht auf Ziel</td></tr>
+    <tr><td>Write range</td><td>Min/Max der fehlenden Zeitstempel</td></tr>
+  </tbody>
+</table>
+
+<h3 id="syncreportdialog">4.3 SyncReportDialog</h3>
+<p><strong>Datei:</strong> <code class="inline">Forms/SyncReportDialog.cs</code></p>
+<p>Modaler Post-Backfill-Bericht. Nimmt einen <a href="#models">SyncRunReport</a> im Konstruktor
+und zeigt eine Kopfzeile (Quelle → Ziel, Dauer, Erfolgsquote), eine Summenzeile, ein
+Per-Tag-DataGridView und drei Buttons: CSV exportieren, TXT exportieren, Schließen.</p>
+
+<ul>
+  <li>Komplett fehlgeschlagener Tag (<code class="inline">BatchesFailed &gt; 0 &amp;&amp; BatchesSucceeded == 0</code>) → Zeile blass rot eingefärbt.</li>
+  <li>Mischung aus Erfolg + Fehlern → blass gelb.</li>
+  <li>Tooltip in der Fehler-Zelle enthält die vollständige Liste (zeilengetrennt).</li>
+  <li>CSV verwendet <strong>Semikolon</strong> als Trennzeichen (Excel-freundlich in Locales mit Komma als Dezimaltrenner).</li>
+  <li>TXT ist ein kolumnares Layout zum Einfügen in Tickets.</li>
+</ul>
+
+<h3 id="schedulersettingsdialog">4.4 SchedulerSettingsDialog</h3>
+<p><strong>Datei:</strong> <code class="inline">Forms/SchedulerSettingsDialog.cs</code></p>
+<p>Modaler Dialog, geöffnet über das Statusleisten-Label <code class="inline">lblSchedule</code>. Liest
+direkt aus und schreibt in <code class="inline">Settings.Default</code>; das aufrufende Formular wendet die
+Einstellungen nach <code class="inline">DialogResult.OK</code> erneut auf
+<a href="#svc-schedule">ScheduleService</a> an.</p>
+
+<table>
+  <thead><tr><th>Steuerelement</th><th>Gebundene Einstellung</th><th>Standard</th></tr></thead>
+  <tbody>
+    <tr><td>Zeitplan aktivieren</td><td><code class="inline">ScheduleEnabled</code></td><td><code class="inline">false</code></td></tr>
+    <tr><td>Lauf alle (Minuten)</td><td><code class="inline">ScheduleIntervalMinutes</code></td><td>60</td></tr>
+    <tr><td>Auswertungsfenster (Stunden)</td><td><code class="inline">ScheduleEvalWindowHours</code></td><td>24</td></tr>
+    <tr><td>Richtung</td><td><code class="inline">ScheduleDirection</code></td><td>"Both"</td></tr>
+    <tr><td>Tag-Filter</td><td><code class="inline">ScheduleTagFilter</code></td><td>"*"</td></tr>
+    <tr><td>Beim Start ausführen</td><td><code class="inline">ScheduleRunOnStartup</code></td><td><code class="inline">false</code></td></tr>
+  </tbody>
+</table>
+
+<p>Der türkisfarbene "Run Now"-Button setzt <code class="inline">RunNowRequested = true</code> vor dem
+Schließen — das aufrufende Formular prüft dies und löst sofort
+<code class="inline">_schedule.TriggerNowAsync()</code> aus.</p>
+
+<h2 id="services">5. Services</h2>
+
+<h3 id="svc-connection">5.1 HistorianConnectionService</h3>
+<p><strong>Datei:</strong> <code class="inline">Services/HistorianConnectionService.cs</code></p>
+<p>Hält beide <code class="inline">ServerConnection</code>-Instanzen und macht deren Lebenszyklus
+zugänglich. Implementiert <code class="inline">IDisposable</code> — <code class="inline">OnFormClosing</code> des Formulars
+stellt sicher, dass beide Verbindungen beim Beenden explizit getrennt werden.</p>
+
+<h4>Öffentliche Schnittstelle</h4>
+<div class="signature">bool IsPrimaryConnected { get; }</div>
+<div class="signature">bool IsSecondaryConnected { get; }</div>
+<div class="signature">ServerConnection Primary { get; }</div>
+<div class="signature">ServerConnection Secondary { get; }</div>
+<div class="signature">void ConnectPrimary(string hostname)</div>
+<div class="signature">void ConnectSecondary(string hostname)</div>
+<div class="signature">void DisconnectPrimary()</div>
+<div class="signature">void DisconnectSecondary()</div>
+<div class="signature">void Dispose()</div>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Services/HistorianConnectionService.cs</span></div>
+<pre><code class="language-csharp">public void ConnectPrimary(string hostname)
+{
+    if (string.IsNullOrWhiteSpace(hostname))
+        throw new ArgumentException("Hostname cannot be empty.", nameof(hostname));
+    DisconnectPrimary();
+    _primary = new ServerConnection(new ConnectionProperties { ServerHostName = hostname });
+    _primary.Connect();
+    PrimaryHostname = hostname;
+}
+
+public void DisconnectPrimary()
+{
+    if (_primary != null)
+    {
+        try { if (_primary.IsConnected()) _primary.Disconnect(); }
+        catch (Exception ex) { Trace.TraceWarning("Error disconnecting primary: " + ex.Message); }
+        _primary = null;
+    }
+}</code></pre>
+</div>
+
+<h3 id="svc-data">5.2 HistorianDataService</h3>
+<p><strong>Datei:</strong> <code class="inline">Services/HistorianDataService.cs</code></p>
+<p>Alle Historian-Aufrufe von <code class="inline">IData</code> und <code class="inline">ITags</code>. Jeder Aufruf wird
+in <a href="#svc-retry">RetryHelper.Retry</a> verpackt mit konfigurierbarer Anzahl Versuche
+(app.config <code class="inline">MaxRetryAttempts</code>, Standard 3).</p>
+
+<table>
+  <thead><tr><th>Methode</th><th>Liefert</th><th>Zweck</th></tr></thead>
+  <tbody>
+    <tr><td><code class="inline">BrowseTags(conn, mask)</code></td><td><code class="inline">List&lt;Tag&gt;</code></td><td>Paginierte Tag-Abfrage, alle Seiten</td></tr>
+    <tr><td><code class="inline">TagExists(conn, name)</code></td><td><code class="inline">bool</code></td><td>Existenzprüfung für einen Tag</td></tr>
+    <tr><td><code class="inline">ReadInterpolated(conn, tag, from, to, count)</code></td><td>Tupel</td><td>Fest definierte Anzahl interpolierter Werte</td></tr>
+    <tr><td><code class="inline">ReadRaw(conn, tag, from)</code></td><td>Tupel</td><td>Alle Rohwerte ab <code class="inline">from</code></td></tr>
+    <tr><td><code class="inline">ReadRawInRange(conn, tag, start, end)</code></td><td>Tupel</td><td>Rohwerte auf halboffenes <code class="inline">[start, end)</code> beschnitten</td></tr>
+    <tr><td><code class="inline">WriteFloatSamples(conn, tag, …)</code></td><td><code class="inline">List&lt;string&gt;</code></td><td>Schreiben mit einheitlicher Qualität (Good)</td></tr>
+    <tr><td><code class="inline">WriteFloatSamplesWithQuality(conn, tag, …)</code></td><td><code class="inline">List&lt;string&gt;</code></td><td>Erhält Qualität pro Sample beim Schreiben</td></tr>
+    <tr><td><code class="inline">VerifyWrite(conn, tag, start, end, expectedCount)</code></td><td><code class="inline">(int, int)</code></td><td>Read-after-write-Check</td></tr>
+  </tbody>
+</table>
+
+<h4>Pagination-Muster</h4>
+<p>Die paginierte Proficy-Abfrage verlässt die Schleife auf der letzten Seite — die letzte
+Seite steht aber im Out-Parameter. Daher muss <code class="inline">AddRange</code> nach der Schleife
+einmal mehr aufgerufen werden.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Services/HistorianDataService.cs</span></div>
+<pre><code class="language-csharp">public List&lt;Tag&gt; BrowseTags(ServerConnection conn, string tagnameMask)
+{
+    return RetryHelper.Retry(() =&gt;
+    {
+        TagQueryParams query = new TagQueryParams { PageSize = 100 };
+        query.Criteria.TagnameMask = string.IsNullOrWhiteSpace(tagnameMask) ? "*" : tagnameMask;
+        query.Criteria.DataType = Tag.NativeDataType.Float;
+
+        List&lt;Tag&gt; allTags = new List&lt;Tag&gt;();
+        List&lt;Tag&gt; page;
+        while (conn.ITags.Query(ref query, out page))
+            allTags.AddRange(page);
+        allTags.AddRange(page);    // ← letzte Seite nach Schleifen-Ende — Pflicht!
+        return allTags;
+    }, _maxRetries);
+}</code></pre>
+</div>
+
+<h4>Parser-Nahtstelle (SampleFilter-Integration)</h4>
+<p>Lese-Methoden wandeln das Proficy-<code class="inline">DataSet</code> über einen privaten Generator
+in einen Strom von <code class="inline">(DateTime, object, double)</code>-Tupeln um und reichen ihn dann an
+<a href="#svc-samplefilter">SampleFilter</a> weiter. Damit bleibt der Kontakt mit Proficy-Typen
+auf eine enge Schleife begrenzt und die Parser-Logik bleibt unit-testbar.</p>
+
+<h3 id="svc-gap">5.3 GapAnalysisService</h3>
+<p><strong>Datei:</strong> <code class="inline">Services/GapAnalysisService.cs</code></p>
+<p>Reine Logik — erkennt Lücken in einer Sample-Zeitliste und plant Per-Batch-Backfill-Fenster.
+Keine Proficy- oder WinForms-Abhängigkeiten. Der am ausführlichsten getestete Service.</p>
+
+<h4>Erkennungsalgorithmus</h4>
+<ol>
+  <li>Deltas zwischen aufeinanderfolgenden Samples berechnen.</li>
+  <li><code class="inline">ExpectedInterval = Median(deltas)</code> — robust gegen Ausreißer.</li>
+  <li><code class="inline">threshold = max(median × 1.5, MinGapDuration)</code> — die Untergrenze schützt vor Deadband-Tags.</li>
+  <li><code class="inline">GapWindow</code> für jedes Paar, bei dem <code class="inline">delta &gt; threshold</code>.</li>
+  <li>Führende + nachlaufende Lücken, wenn Daten das Auswertungsfenster nicht vollständig abdecken.</li>
+  <li>Leerer Server: eine Lücke über die gesamte Periode emittieren, damit Backfill ein Ziel hat.</li>
+  <li>Jede Lücke wird in <code class="inline">GapBatch</code>-Objekte mit Dauer <code class="inline">BatchSize</code> aufgeteilt.</li>
+</ol>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Services/GapAnalysisService.cs</span><span class="lines">Schwellwert + leerer Server</span></div>
+<pre><code class="language-csharp">result.ExpectedInterval = Median(deltas);
+
+long medianBasedTicks = (long)(result.ExpectedInterval.Ticks * GapThresholdMultiplier);
+TimeSpan gapThreshold = TimeSpan.FromTicks(
+    Math.Max(medianBasedTicks, _minGapDuration.Ticks));
+
+// Leerer Server: Lücke über ganze Periode emittieren, damit Backfill ein Ziel hat
+if (!result.HasData &amp;&amp; hasEvalPeriod)
+{
+    var window = new GapWindow { Start = evalFrom, End = evalTo };
+    window.Batches = PlanBatches(window.Start, window.End);
+    result.Gaps.Add(window);
+    result.CoverageRatio = 0.0;
+}</code></pre>
+</div>
+
+<h4>Backfill-Feasibility</h4>
+<p>Für jeden Batch jeder Lücke werden die Samples des anderen Servers geprüft: Liegt mindestens
+ein Sample im halboffenen Intervall <code class="inline">[batch.Start, batch.End)</code>, wird der Batch
+mit <code class="inline">CanBackfill = true</code> markiert. Wird zur farblichen Hervorhebung im Lücken-Grid
+genutzt; <strong>nicht</strong> vom Direct-Comparison-Backfill konsultiert.</p>
+
+<h3 id="svc-retry">5.4 RetryHelper</h3>
+<p><strong>Datei:</strong> <code class="inline">Services/RetryHelper.cs</code></p>
+<p>Reines Retry-mit-Backoff. Als statischer Helfer herausgelöst, damit es mit injiziertem
+Sleep-Delegate unit-testbar ist — keine echten Wartezeiten in Tests, keine Proficy-Abhängigkeit.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Services/RetryHelper.cs</span></div>
+<pre><code class="language-csharp">public static T Retry&lt;T&gt;(
+    Func&lt;T&gt; action,
+    int maxAttempts,
+    int[] delaysMs = null,
+    Action&lt;int&gt; sleep = null)
+{
+    delaysMs = delaysMs ?? DefaultDelaysMs;     // { 500, 1000, 2000 }
+    sleep    = sleep    ?? Thread.Sleep;
+
+    Exception last = null;
+    for (int attempt = 0; attempt &lt; maxAttempts; attempt++)
+    {
+        try { return action(); }
+        catch (Exception ex)
+        {
+            last = ex;
+            if (attempt &lt; maxAttempts - 1 &amp;&amp; attempt &lt; delaysMs.Length)
+                sleep(delaysMs[attempt]);
+        }
+    }
+    throw new InvalidOperationException(
+        $"Operation failed after {maxAttempts} attempts: {last?.Message}", last);
+}</code></pre>
+</div>
+
+<h3 id="svc-samplefilter">5.5 SampleFilter</h3>
+<p><strong>Datei:</strong> <code class="inline">Services/SampleFilter.cs</code></p>
+<p>Reiner Tupel-Strom-Parser. Verwirft <code class="inline">null</code>- und nicht parsbare Werte und
+beschneidet optional auf das halboffene Intervall <code class="inline">[start, end)</code>. Der
+<code class="inline">break</code> bei Zeit außerhalb des Bereichs setzt chronologische Eingabe vom
+Historian voraus.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Services/SampleFilter.cs</span></div>
+<pre><code class="language-csharp">public static List&lt;(DateTime Time, float Value, double Quality)&gt; ParseAndClip(
+    IEnumerable&lt;(DateTime Time, object Value, double Quality)&gt; raw,
+    DateTime start, DateTime end)
+{
+    var result = new List&lt;(DateTime, float, double)&gt;();
+    if (raw == null) return result;
+    foreach (var s in raw)
+    {
+        if (s.Time &gt;= end) break;          // halboffen: end ist AUSSEN
+        if (s.Time &lt; start) continue;      // halboffen: start ist INNEN
+        if (s.Value == null) continue;
+        float v;
+        if (!float.TryParse(s.Value.ToString(), out v)) continue;
+        result.Add((s.Time, v, s.Quality));
+    }
+    return result;
+}</code></pre>
+</div>
+
+<h3 id="svc-samplebucketer">5.6 SampleBucketer</h3>
+<p><strong>Datei:</strong> <code class="inline">Services/SampleBucketer.cs</code></p>
+<p>Gruppiert eine sortierte Sample-Liste in Buckets, in denen jeder Bucket bis zu
+<code class="inline">bucketSize</code> ab der Zeit seines ersten Samples umfasst. Der Bucket-Start
+<strong>setzt sich zurück</strong> auf die Zeit des nächsten Samples, sobald der Abstand
+<code class="inline">bucketSize</code> übersteigt.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Services/SampleBucketer.cs</span></div>
+<pre><code class="language-csharp">public static List&lt;List&lt;(DateTime, float, double)&gt;&gt; GroupByBucket(
+    List&lt;(DateTime Time, float Value, double Quality)&gt; sorted, TimeSpan bucketSize)
+{
+    var result = new List&lt;List&lt;(DateTime, float, double)&gt;&gt;();
+    if (sorted == null || sorted.Count == 0) return result;
+
+    var current = new List&lt;(DateTime, float, double)&gt; { sorted[0] };
+    DateTime bucketStart = sorted[0].Time;
+
+    for (int i = 1; i &lt; sorted.Count; i++)
+    {
+        if (sorted[i].Time - bucketStart &lt; bucketSize)
+            current.Add(sorted[i]);
+        else
+        {
+            result.Add(current);
+            current     = new List&lt;(DateTime, float, double)&gt; { sorted[i] };
+            bucketStart = sorted[i].Time;     // Reset, kein Fortschreiten
+        }
+    }
+    if (current.Count &gt; 0) result.Add(current);
+    return result;
+}</code></pre>
+</div>
+
+<h3 id="svc-schedule">5.7 ScheduleService</h3>
+<p><strong>Datei:</strong> <code class="inline">Services/ScheduleService.cs</code></p>
+<p>Hält einen 15-Sekunden-Polling-<code class="inline">System.Windows.Forms.Timer</code>, der ein Delegate
+auslöst, sobald der Next-Run-Zeitpunkt verstrichen ist. Die eigentliche Arbeit wird delegiert —
+diese Klasse kümmert sich nur um Taktung, Gating und Next-Run-Buchführung.</p>
+
+<h4>Gating-Regeln</h4>
+<p><code class="inline">Tick</code>-Events werden ignoriert, wenn:</p>
+<ul>
+  <li>der Service deaktiviert ist;</li>
+  <li>bereits ein Lauf in Bearbeitung ist;</li>
+  <li>die aktuelle Zeit vor <code class="inline">NextRunUtc</code> liegt.</li>
+</ul>
+
+<h4>Next-Run-Berechnung</h4>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Services/ScheduleService.cs</span></div>
+<pre><code class="language-csharp">private void ComputeNextRun()
+{
+    var nowUtc = DateTime.UtcNow;
+
+    // Nie gelaufen (oder LastRun uralt) → erster Lauf ein Intervall in die Zukunft.
+    if (_lastRunUtc &lt; nowUtc.AddDays(-7))
+    {
+        _nextRunUtc = nowUtc.AddMinutes(_intervalMinutes);
+        return;
+    }
+
+    // Nächstes Intervall nach letztem Lauf. Wenn mehrere Intervalle verpasst wurden
+    // (Laptop im Standby), kein Nachholbedarf — einfach in 30 s loslegen.
+    _nextRunUtc = _lastRunUtc.AddMinutes(_intervalMinutes);
+    if (_nextRunUtc &lt; nowUtc) _nextRunUtc = nowUtc.AddSeconds(30);
+}</code></pre>
+</div>
+
+<h3 id="svc-schedulelog">5.8 ScheduleLogger</h3>
+<p><strong>Datei:</strong> <code class="inline">Services/ScheduleLogger.cs</code></p>
+<p>Monatlich rollierende Textdatei unter <code class="inline">logs/schedule-YYYY-MM.log</code>.
+Thread-sicher (ein einziger Lock). Verschluckt alle IO-Fehler, sodass Logging-Fehler die
+Anwendung nie zum Absturz bringen.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Services/ScheduleLogger.cs</span></div>
+<pre><code class="language-csharp">public static void Append(string line)
+{
+    try
+    {
+        lock (Gate)
+        {
+            Directory.CreateDirectory(LogDirectory);
+            File.AppendAllText(
+                CurrentLogPath,
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}]  {line}{Environment.NewLine}");
+        }
+    }
+    catch { /* niemals abstürzen wegen Logging */ }
+}</code></pre>
+</div>
+
+<h4>Beispiel-Logeintrag</h4>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">logs/schedule-2026-05.log</span></div>
+<pre><code>[2026-05-28 12:00:00]  === Scheduled run started — window 2026-05-27 12:00 → 2026-05-28 12:00, direction=Both, filter=* ===
+[2026-05-28 12:00:00]  Shared tags: 47
+[2026-05-28 12:00:34]  Primary→Secondary  tags=47  batches=12/12  samples=480  duration=33.8s
+[2026-05-28 12:01:09]  Secondary→Primary  tags=47  batches=0/0   samples=0    duration=34.2s
+[2026-05-28 12:01:09]  === Scheduled run completed ===
+</code></pre>
+</div>
+
+<h2 id="models">6. Models</h2>
+
+<p>Einfache Datenklassen — kein Verhalten außer berechneten Eigenschaften. Liegen unter
+<code class="inline">Models/</code>.</p>
+
+<h3>GapAnalysisResult / GapWindow / GapBatch</h3>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Models/GapAnalysisResult.cs</span></div>
+<pre><code class="language-csharp">public class GapAnalysisResult
+{
+    public bool HasData { get; set; }
+    public bool HasGaps =&gt; Gaps != null &amp;&amp; Gaps.Count &gt; 0;
+    public int  TotalSamples { get; set; }
+    public DateTime FirstTimestamp { get; set; }
+    public DateTime LastTimestamp  { get; set; }
+    public TimeSpan ExpectedInterval     { get; set; }    // Median-Delta
+    public TimeSpan LargestGapDuration   { get; set; }
+    public TimeSpan TotalMissingDuration { get; set; }
+    public double CoverageRatio { get; set; }    // 0.0 – 1.0
+    public List&lt;DateTime&gt;  SampleTimes { get; set; }
+    public List&lt;GapWindow&gt; Gaps        { get; set; }
+    public string ServerLabel { get; set; }
+    public string TagName     { get; set; }
+}
+
+public class GapWindow
+{
+    public DateTime Start { get; set; }
+    public DateTime End   { get; set; }
+    public TimeSpan Duration =&gt; End - Start;
+    public List&lt;GapBatch&gt; Batches { get; set; }
+}
+
+public class GapBatch
+{
+    public DateTime Start { get; set; }
+    public DateTime End   { get; set; }
+    public TimeSpan Duration =&gt; End - Start;
+    public bool CanBackfill { get; set; }
+    public bool Verified    { get; set; }
+    public int  SamplesWritten { get; set; }
+}</code></pre>
+</div>
+
+<h3>SyncRunReport / TagBackfillResult</h3>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">Models/SyncRunReport.cs</span></div>
+<pre><code class="language-csharp">public class TagBackfillResult
+{
+    public string TagName          { get; set; }
+    public int    BatchesAttempted { get; set; }
+    public int    BatchesSucceeded { get; set; }
+    public int    BatchesFailed    { get; set; }
+    public int    SamplesWritten   { get; set; }
+    public List&lt;string&gt; Errors     { get; set; } = new List&lt;string&gt;();
+}
+
+public class SyncRunReport
+{
+    public DateTime StartedAt   { get; set; }
+    public DateTime CompletedAt { get; set; }
+    public string SourceServer  { get; set; }
+    public string TargetServer  { get; set; }
+    public int    GapsFound     { get; set; }
+    public List&lt;TagBackfillResult&gt; TagResults { get; set; }
+
+    // Aggregate über alle Tags
+    public int BatchesAttempted =&gt; TagResults.Sum(t =&gt; t.BatchesAttempted);
+    public int BatchesSucceeded =&gt; TagResults.Sum(t =&gt; t.BatchesSucceeded);
+    public int BatchesFailed    =&gt; TagResults.Sum(t =&gt; t.BatchesFailed);
+    public int SamplesWritten   =&gt; TagResults.Sum(t =&gt; t.SamplesWritten);
+    public TimeSpan Duration    =&gt; CompletedAt - StartedAt;
+}</code></pre>
+</div>
+
+<h2 id="ui-controls">7. UI-Steuerelemente</h2>
+
+<p>Fünf benutzerdefinierte Steuerelemente liegen in <code class="inline">UI/Controls/</code>. Alle sind
+Theme-bewusst (verwenden Tokens aus <code class="inline">UI/AppTheme.cs</code>) — eine Änderung wirkt sich
+auf das ganze Formular aus.</p>
+
+<h3>AppTheme</h3>
+<p><strong>Datei:</strong> <code class="inline">UI/AppTheme.cs</code></p>
+<p>Zentrale Registrierung der Design-Tokens: Navy-Palette, Akzentfarben (Türkis, Erfolg, Gefahr,
+Warnung), Schriftarten in vier Größen, Steuerelement-Höhen, Seitenleisten-Breiten. Keine
+Magic-Numbers/Farben sonstwo.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">UI/AppTheme.cs</span><span class="lines">Schlüssel-Tokens</span></div>
+<pre><code class="language-csharp">public static readonly Color Navy        = Color.FromArgb(30,  58,  95);   // #1E3A5F
+public static readonly Color NavyLight   = Color.FromArgb(232, 240, 250);  // #E8F0FA
+public static readonly Color Teal        = Color.FromArgb(26,  188, 156);  // #1ABC9C
+public static readonly Color Success     = Color.FromArgb(39,  174, 96);
+public static readonly Color Danger      = Color.FromArgb(231, 76,  60);
+public static readonly Color Warning     = Color.FromArgb(243, 156, 18);
+
+public const int LeftPanelWidth     = 265;
+public const int RightPanelWidth    = 334;
+public const int StatusBarHeight    = 34;
+public const int SectionHeaderHeight = 28;
+public const int ButtonHeight       = 30;</code></pre>
+</div>
+
+<h3>Steuerelemente</h3>
+<table>
+  <thead><tr><th>Steuerelement</th><th>Zweck</th></tr></thead>
+  <tbody>
+    <tr><td><code class="inline">FlatButton</code></td><td>Button-Subklasse mit <code class="inline">FlatButtonStyle</code>-Enum: Primary (Navy), Secondary (Navy-light), Warning (orange), Danger (rot), Info (türkis), Success (grün). Hover-Effekt integriert.</td></tr>
+    <tr><td><code class="inline">CoverageBar</code></td><td>Grün/roter Horizontalbalken. Hover über ein rotes Segment zeigt einen Tooltip mit Zeitbereich + Dauer. Lücken-Rechtecke unter 3 px werden auf 3 px verbreitert, damit sie hoverbar bleiben.</td></tr>
+    <tr><td><code class="inline">SectionHeader</code></td><td>Label im Stil eines Navy-blauen Abschnitts-Trenners (weißer Text). Oberhalb jedes Seitenleisten-Abschnitts.</td></tr>
+    <tr><td><code class="inline">ConnectionDot</code></td><td>14×14 farbiger Kreis zur Anzeige des Server-Verbindungsstatus. Grün/orange/rot/grau.</td></tr>
+    <tr><td><code class="inline">CollapsiblePanel</code></td><td>Panel mit Navy-Header-Leiste und ▼/▲-Toggle. Für die Abschnitte "Activity Log" und "Write Data".</td></tr>
+  </tbody>
+</table>
+
+<h4>CoverageBar-Hit-Test</h4>
+<p>Während <code class="inline">OnPaint</code> speichert das Steuerelement jedes Lücken-Rechteck in einer
+Liste. In <code class="inline">OnMouseMove</code> wird diese Liste auf einen Treffer geprüft und der
+Tooltip angezeigt:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="file-path">UI/Controls/CoverageBar.cs</span></div>
+<pre><code class="language-csharp">protected override void OnMouseMove(MouseEventArgs e)
+{
+    int hitIndex = -1;
+    for (int i = 0; i &lt; _gapRects.Count; i++)
+        if (_gapRects[i].Rect.Contains(e.Location)) { hitIndex = i; break; }
+
+    if (hitIndex == _lastHoverIndex) return;     // Deduplizierung
+    _lastHoverIndex = hitIndex;
+
+    if (hitIndex &gt;= 0)
+    {
+        var seg = _gapRects[hitIndex];
+        _tooltip.Show(
+            $"{TooltipLabel}\n" +
+            $"{seg.Start:yyyy-MM-dd HH:mm} → {seg.End:yyyy-MM-dd HH:mm}\n" +
+            $"Dauer: {FormatDuration(seg.End - seg.Start)}",
+            this, e.X + 14, e.Y + 18, 10000);
+    }
+    else
+        _tooltip.Show($"Abgedeckt\nAbdeckung: {_coverageRatio:P1}", this, e.X + 14, e.Y + 18, 5000);
+}</code></pre>
+</div>
+
+<h2 id="configuration">8. Konfiguration</h2>
+
+<p>Zwei Quellen: <code class="inline">app.config</code> (XML, mit der .exe ausgeliefert) und
+<code class="inline">Properties.Settings</code> (pro Benutzer, persistiert nach <code class="inline">%LocalAppData%</code>).</p>
+
+<h3>app.config — anwendungsweite Stellschrauben</h3>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">app.config</span></div>
+<pre><code class="language-xml">&lt;?xml version="1.0" encoding="utf-8" ?&gt;
+&lt;configuration&gt;
+  &lt;startup&gt;
+    &lt;supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.8" /&gt;
+  &lt;/startup&gt;
+  &lt;appSettings&gt;
+    &lt;add key="SyncTagName" value="HistSync" /&gt;
+    &lt;add key="BatchSizeMinutes" value="10" /&gt;
+    &lt;add key="MaxRetryAttempts" value="3" /&gt;
+    &lt;!-- Minimum-Lückendauer in Sekunden. Deltas unter diesem Wert werden NIE
+         als Lücke markiert, selbst wenn median * 1.5 das so sagen würde.
+         Schützt vor Deadband-aufgezeichneten Tags. Standard 120 s. --&gt;
+    &lt;add key="MinimumGapSeconds" value="120" /&gt;
+  &lt;/appSettings&gt;
+&lt;/configuration&gt;</code></pre>
+</div>
+
+<h3>Properties.Settings — Persistenz pro Benutzer</h3>
+<p>Gespeichert unter <code class="inline">%LocalAppData%\HistorianSyncTool_*\&lt;ver&gt;\user.config</code>.</p>
+
+<table>
+  <thead><tr><th>Einstellung</th><th>Typ</th><th>Standard</th><th>Zweck</th></tr></thead>
+  <tbody>
+    <tr><td><code class="inline">PrimaryHostname</code></td><td>string</td><td>""</td><td>Persistierter Primary-Eintrag</td></tr>
+    <tr><td><code class="inline">SecondaryHostname</code></td><td>string</td><td>""</td><td>Persistierter Secondary-Eintrag</td></tr>
+    <tr><td><code class="inline">TagnameFilter</code></td><td>string</td><td>"*"</td><td>Zuletzt verwendete Browse-Maske</td></tr>
+    <tr><td><code class="inline">StartDate / EndDate</code></td><td>DateTime</td><td>—</td><td>Zuletzt verwendetes Auswertungsfenster</td></tr>
+    <tr><td><code class="inline">ScheduleEnabled</code></td><td>bool</td><td>false</td><td>Haupt-Schalter für den Zeitplan</td></tr>
+    <tr><td><code class="inline">ScheduleIntervalMinutes</code></td><td>int</td><td>60</td><td>Zeit zwischen Läufen</td></tr>
+    <tr><td><code class="inline">ScheduleEvalWindowHours</code></td><td>int</td><td>24</td><td>Rollendes Fenster ab "jetzt"</td></tr>
+    <tr><td><code class="inline">ScheduleDirection</code></td><td>string</td><td>"Both"</td><td>P→S / S→P / Both</td></tr>
+    <tr><td><code class="inline">ScheduleTagFilter</code></td><td>string</td><td>"*"</td><td>Maske auf Shared-Tag-Schnittmenge</td></tr>
+    <tr><td><code class="inline">ScheduleRunOnStartup</code></td><td>bool</td><td>false</td><td>Einen Lauf kurz nach Start auslösen</td></tr>
+    <tr><td><code class="inline">ScheduleLastRunUtc</code></td><td>DateTime</td><td>—</td><td>Eingabe für ComputeNextRun</td></tr>
+  </tbody>
+</table>
+
+<h2 id="tests">9. Tests</h2>
+
+<p><strong>Projekt:</strong> <code class="inline">HistorianSyncTool.Tests/</code> — MSTest, .NET 4.8, x86.</p>
+
+<p>Das Test-Projekt referenziert die Proficy-DLL <strong>bewusst nicht</strong>. Alle vier
+Testdateien decken reine-Logik-Services ab, die sich mit synthetischen Eingaben prüfen lassen:
+<code class="inline">GapAnalysisService</code>, <code class="inline">RetryHelper</code>, <code class="inline">SampleFilter</code>,
+<code class="inline">SampleBucketer</code>. Code, der Proficy-Typen anfasst, ist klein gehalten (ein Generator
++ ein Service-Call-Wrapper), sodass die testbaren Nahtstellen die sinnvolle Logik abdecken.</p>
+
+<table>
+  <thead><tr><th>Test-Klasse</th><th>Abdeckung</th><th>Fälle</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code class="inline">GapAnalysisServiceTests</code></td>
+      <td>Analyze, MarkBackfillFeasibility, PlanBatches, Median</td>
+      <td>~25 — leer/null/Einzelsample, kontinuierliche Daten, Einzel- + Mehrfachlücke, Median gerade/ungerade/leer, Batch-Grenzen, halboffene Feasibility, Sortier-Validierung, Deadband-Untergrenze (unterdrücken + dennoch erkennen).</td>
+    </tr>
+    <tr>
+      <td><code class="inline">RetryHelperTests</code></td>
+      <td>Erfolg / Fehler / Backoff-Timing</td>
+      <td>8 — Erfolg-ohne-Sleep, Fehler-dann-Erfolg-mit-einem-Sleep, alle-Fehler-wrapped, kein-Sleep-nach-letztem-Versuch, kürzere Delay-Arrays toleriert, Argument-Validierung.</td>
+    </tr>
+    <tr>
+      <td><code class="inline">SampleFilterTests</code></td>
+      <td>Parse + ParseAndClip</td>
+      <td>13 — null/leer, verwirft null + nicht parsbar, parst String-Floats, erhält Quality, halboffene Grenzen (start INNEN, end AUSSEN), Early-Break verifiziert.</td>
+    </tr>
+    <tr>
+      <td><code class="inline">SampleBucketerTests</code></td>
+      <td>GroupByBucket</td>
+      <td>9 — leer/null, einzelnes Sample, alles innerhalb der Bucket-Größe, Lücke führt zu Split, exakte Grenze, Bucket-Reset-Verhalten, dichter 1000-Sample-Stress.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="build">10. Build &amp; Auslieferung</h2>
+
+<h3>Voraussetzungen</h3>
+<ul>
+  <li><strong>OS:</strong> Windows (x86-kompatibel).</li>
+  <li><strong>.NET Framework:</strong> 4.8 (Developer-Pack zum Kompilieren, Runtime zum Ausführen).</li>
+  <li><strong>Proficy Historian SDK:</strong> Der Client-Tools-Installer legt
+      <code class="inline">Proficy.Historian.ClientAccess.API.dll</code> in den Pfad, auf den das Projekt verweist.</li>
+  <li><strong>Build-Werkzeug:</strong> Visual Studio 2022 oder VS BuildTools 2022.</li>
+</ul>
+
+<h3>Build (Visual Studio)</h3>
+<ol>
+  <li><code class="inline">HistorianSyncTool.sln</code> öffnen.</li>
+  <li>Solution-Konfiguration → <strong>Release</strong>.</li>
+  <li>Plattform → <strong>x86</strong>.</li>
+  <li>Build → Projektmappe neu erstellen (<span class="kbd">Strg+Alt+F7</span>).</li>
+</ol>
+
+<h3>Build (Kommandozeile)</h3>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">PowerShell</span></div>
+<pre><code>$msb = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
+&amp; $msb HistorianSyncTool.sln /p:Configuration=Release /p:Platform=x86 /t:Rebuild</code></pre>
+</div>
+
+<h3>Ausgabe</h3>
+<div class="code-block">
+  <div class="code-header"><span class="file-path">bin/Release/</span></div>
+<pre><code>HistorianSyncTool.exe                     ← die Anwendung
+HistorianSyncTool.exe.config              ← von app.config abgeleitet
+HistorianSyncTool.pdb                     ← Debug-Symbole (optional)
+Proficy.Historian.ClientAccess.API.dll    ← neben die .exe kopiert</code></pre>
+</div>
+
+<h3>Auslieferung auf andere Maschine</h3>
+<ul>
+  <li>Inhalt von <code class="inline">bin\Release\</code> in ein Verzeichnis auf dem Zielsystem kopieren.</li>
+  <li>Zielsystem benötigt .NET Framework 4.8 Runtime.</li>
+  <li>Netzwerk-Erreichbarkeit zu Historian Primary &amp; Secondary auf Port 13000.</li>
+  <li>Die .exe in ein beschreibbares Verzeichnis legen (Scheduler-Logs werden daneben angelegt).</li>
+</ul>
+
+<h2 id="glossary">11. Glossar</h2>
+
+<table>
+  <thead><tr><th>Begriff</th><th>Definition</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Backfill</strong></td><td>Das Schreiben fehlender Messwerte von einem Server zum anderen.</td></tr>
+    <tr><td><strong>Batch</strong></td><td>Ein Bucket von Samples (Standard 10 min), der in einem einzelnen <code class="inline">IData.Add</code>-Aufruf geschrieben und individuell verifiziert wird.</td></tr>
+    <tr><td><strong>ClientAccess-API</strong></td><td>Die .NET-Assembly <code class="inline">Proficy.Historian.ClientAccess.API.dll</code> mit <code class="inline">ServerConnection</code>, <code class="inline">IData</code>, <code class="inline">ITags</code> etc.</td></tr>
+    <tr><td><strong>CoverageRatio (Abdeckung)</strong></td><td><code class="inline">(GesamtSpanne − FehlendeDauer) / GesamtSpanne</code> — 0,0 bis 1,0.</td></tr>
+    <tr><td><strong>Deadband</strong></td><td>Eine Historian-Collector-Einstellung, die nur dann einen Sample schreibt, wenn sich der Wert um mehr als einen Schwellwert ändert. Erzeugt unregelmäßige Intervalle.</td></tr>
+    <tr><td><strong>Direct Comparison</strong></td><td>Aktuelle Backfill-Strategie: Zeitstempel kopieren, die auf der Quelle vorhanden, aber auf dem Ziel fehlen — ohne Lückenfenster-Heuristik.</td></tr>
+    <tr><td><strong>Auswertungsfenster</strong></td><td>Der vom Benutzer gewählte <code class="inline">[from, to]</code>-Bereich, der Analyse und Backfill begrenzt.</td></tr>
+    <tr><td><strong>Untergrenze (MinimumGapSeconds)</strong></td><td>Absolutes Minimum, das ein Delta überschreiten muss, um als Lücke markiert zu werden. Standard 120 s.</td></tr>
+    <tr><td><strong>Lückenfenster (GapWindow)</strong></td><td>Ein <code class="inline">[start, end]</code>-Intervall ohne Samples. Wird von <code class="inline">GapAnalysisService.PlanBatches</code> in Batches geteilt.</td></tr>
+    <tr><td><strong>Halboffenes Intervall</strong></td><td><code class="inline">[start, end)</code> — start inklusiv, end exklusiv.</td></tr>
+    <tr><td><strong>HistSync</strong></td><td>Konfigurierbarer "Heartbeat"-Tag, der als Fallback dient, wenn kein Tag ausgewählt ist. Standardname <code class="inline">"HistSync"</code>.</td></tr>
+    <tr><td><strong>Median-Intervall</strong></td><td>Median aller aufeinanderfolgenden Sample-Deltas — robust gegen Ausreißer. Treibt den Schwellwert.</td></tr>
+    <tr><td><strong>net.tcp</strong></td><td>Das WCF-Binding, das die Proficy-ClientAccess-API verwendet. Standard-Port 13000.</td></tr>
+    <tr><td><strong>Primary / Secondary</strong></td><td>Die beiden Historian-Server. Primary ist maßgeblich; Secondary spiegelt.</td></tr>
+    <tr><td><strong>Quality</strong></td><td>Per-Sample-Zuverlässigkeitsflag: Good / Uncertain / Bad. Wird beim Backfill erhalten.</td></tr>
+    <tr><td><strong>Tick</strong></td><td>100-Nanosekunden-Einheit von .NET-<code class="inline">DateTime</code>. Der Direct-Comparison-Diff hasht über <code class="inline">Time.Ticks</code> (long) für schnellen Set-Lookup.</td></tr>
+    <tr><td><strong>Unattended (unbeaufsichtigt)</strong></td><td>Geplanter Modus — unterdrückt <code class="inline">SyncReportDialog</code> und loggt in Datei.</td></tr>
+    <tr><td><strong>Verify (read-after-write)</strong></td><td>Nach jedem Schreiben wird <code class="inline">[firstTime − 1 s, lastTime + 1 s]</code> erneut gelesen und <code class="inline">actual ≥ expected</code> geprüft. Die ±1 s tolerieren die Sekunden-genaue Rundung des Historian.</td></tr>
+  </tbody>
+</table>
+
+<p style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-soft); text-align: center;">
+HistorianSyncTool · Letzte Quellcode-Sichtung 2026-05-28
+</p>
+
+</main>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  if (window.hljs) {
+    document.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+  }
+});
+
+if (window.mermaid) {
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'neutral',
+    themeVariables: {
+      primaryColor: '#E8F0FA',
+      primaryBorderColor: '#1E3A5F',
+      primaryTextColor: '#2C3E50',
+      lineColor: '#1E3A5F',
+      fontFamily: '-apple-system, "Segoe UI", system-ui, sans-serif',
+      fontSize: '14px'
+    },
+    sequence: {
+      mirrorActors: false,
+      bottomMarginAdj: 8,
+      messageFontSize: 15,
+      actorFontSize: 15,
+      noteFontSize: 14,
+      actorMargin: 60,
+      boxMargin: 14
+    },
+    flowchart: {
+      htmlLabels: true,
+      curve: 'basis',
+      nodeSpacing: 55,
+      rankSpacing: 55,
+      padding: 12
+    },
+    securityLevel: 'loose'
+  });
+
+  function makeResponsive() {
+    document.querySelectorAll('.mermaid svg').forEach(svg => {
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      svg.style.width  = '100%';
+      svg.style.maxWidth = '100%';
+      svg.style.height = 'auto';
+    });
+  }
+  document.addEventListener('mermaid:rendered', makeResponsive);
+  setTimeout(makeResponsive, 1500);
+  setTimeout(makeResponsive, 3000);
+  window.addEventListener('beforeprint', makeResponsive);
+}
+
+const $search = document.getElementById('search');
+const $nav    = document.getElementById('nav');
+const $clear  = document.getElementById('nav-clear');
+
+function applyFilter(q) {
+  q = q.trim().toLowerCase();
+  const items = $nav.querySelectorAll('li');
+  if (!q) {
+    items.forEach(li => li.classList.remove('hidden'));
+    $clear.style.display = 'none';
+    return;
+  }
+  $clear.style.display = 'block';
+  items.forEach(li => li.classList.add('hidden'));
+  $nav.querySelectorAll('a').forEach(a => {
+    if (a.textContent.toLowerCase().includes(q)) {
+      let el = a.parentElement;
+      while (el && el !== $nav) {
+        if (el.tagName === 'LI') el.classList.remove('hidden');
+        el = el.parentElement;
+      }
+    }
+  });
+}
+$search.addEventListener('input', e => applyFilter(e.target.value));
+$clear.addEventListener('click', () => { $search.value = ''; applyFilter(''); $search.focus(); });
+
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    $search.focus();
+    $search.select();
+  }
+});
+
+const sections = [...document.querySelectorAll('h2[id], h3[id]')];
+const navLinks = new Map();
+document.querySelectorAll('.nav a[href^="#"]').forEach(a => {
+  navLinks.set(a.getAttribute('href').slice(1), a);
+});
+const observer = new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    if (entry.isIntersecting) {
+      const id = entry.target.id;
+      navLinks.forEach((a, key) => a.classList.toggle('active', key === id));
+      break;
+    }
+  }
+}, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
