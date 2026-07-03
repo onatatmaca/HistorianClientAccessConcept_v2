@@ -87,23 +87,56 @@ namespace HistorianSyncTool.Services
             }, _maxRetries);
         }
 
+        /// <summary>
+        /// Raw samples in [start, end], read as bounded RawByNumberQuery chunks so the
+        /// query stops at the range end instead of paging to the END OF THE ARCHIVE
+        /// (the old RawByTimeQuery loop read years of data for a one-week window on real
+        /// plant archives). Chunked queries are also the only safe way to stop early:
+        /// abandoning a RawByTime pagination mid-way leaks a server-side cursor until it
+        /// expires ("Maximum number of cached items exceeded" — verified live).
+        /// </summary>
         public List<(DateTime Time, float Value, double Quality)> ReadRawInRange(
             ServerConnection conn, string tagName, DateTime start, DateTime end)
         {
+            const uint chunk = 5000;
             return RetryHelper.Retry(() =>
             {
-                DataQueryParams query = new RawByTimeQuery(start, tagName)
+                var all = new List<(DateTime Time, object Value, double Quality)>();
+                DateTime cursor = start;
+                while (cursor <= end)
                 {
-                    Fields = DataFields.Time | DataFields.Value | DataFields.Quality
-                };
-                ItemErrors errors;
-                Proficy.Historian.ClientAccess.API.DataSet all = new Proficy.Historian.ClientAccess.API.DataSet();
-                Proficy.Historian.ClientAccess.API.DataSet page = new Proficy.Historian.ClientAccess.API.DataSet();
-                while (conn.IData.Query(ref query, out page, out errors))
-                    all.AddRange(page);
-                all.AddRange(page);
+                    DataQueryParams query = new RawByNumberQuery(cursor, chunk, new[] { tagName })
+                    {
+                        Fields = DataFields.Time | DataFields.Value | DataFields.Quality,
+                        // one server round-trip per chunk — never a dangling continuation
+                        PageSize = (int)chunk + 1
+                    };
+                    ItemErrors errors;
+                    Proficy.Historian.ClientAccess.API.DataSet set;
+                    bool more = conn.IData.Query(ref query, out set, out errors);
+                    while (more) // drain any unexpected continuation pages of this chunk
+                    {
+                        Proficy.Historian.ClientAccess.API.DataSet extra;
+                        more = conn.IData.Query(ref query, out extra, out errors);
+                        if (extra != null) set.AddRange(extra);
+                    }
+                    if (set == null || set.TotalSamples == 0) break;
 
-                return SampleFilter.ParseAndClip(IterateDataSet(all, tagName), start, end);
+                    int n = 0;
+                    DateTime lastTs = cursor;
+                    bool pastEnd = false;
+                    foreach (var raw in IterateDataSet(set, tagName))
+                    {
+                        n++;
+                        lastTs = raw.Time;
+                        if (raw.Time > end) { pastEnd = true; break; }
+                        all.Add(raw);
+                    }
+                    if (pastEnd || n < (int)chunk) break;
+                    cursor = lastTs.AddTicks(1); // next chunk starts after the last stored tick
+                }
+
+                return SampleFilter.ParseAndClip(all, start, end);
             }, _maxRetries);
         }
 

@@ -13,10 +13,24 @@ namespace HistorianSyncTool.Services
     {
         private readonly TimeSpan _batchSize;
         private readonly TimeSpan _minGapDuration;
-        private const double GapThresholdMultiplier = 1.5;
+        private readonly double _thresholdMultiplier;
 
-        public GapAnalysisService(TimeSpan? batchSize = null, TimeSpan? minGapDuration = null)
+        public GapAnalysisService(TimeSpan? batchSize = null, TimeSpan? minGapDuration = null,
+            double? thresholdMultiplier = null)
         {
+            if (thresholdMultiplier.HasValue)
+            {
+                _thresholdMultiplier = thresholdMultiplier.Value;
+            }
+            else
+            {
+                double mult;
+                string cfgMult = ConfigurationManager.AppSettings["GapThresholdMultiplier"];
+                _thresholdMultiplier = double.TryParse(cfgMult,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out mult) && mult > 0
+                    ? mult : 2.0;
+            }
             if (batchSize.HasValue)
             {
                 _batchSize = batchSize.Value;
@@ -44,8 +58,9 @@ namespace HistorianSyncTool.Services
             }
         }
 
-        public TimeSpan BatchSize      => _batchSize;
-        public TimeSpan MinGapDuration => _minGapDuration;
+        public TimeSpan BatchSize          => _batchSize;
+        public TimeSpan MinGapDuration     => _minGapDuration;
+        public double ThresholdMultiplier  => _thresholdMultiplier;
 
         /// <summary>
         /// Analyze a list of sample timestamps, detect gaps, and split them into batches.
@@ -113,12 +128,18 @@ namespace HistorianSyncTool.Services
                 deltas.Add(sampleTimes[i] - sampleTimes[i - 1]);
 
             result.ExpectedInterval = Median(deltas);
-            // Threshold = max(median * 1.5, minGapDuration). The floor guards against
-            // false positives on deadband-logged tags where normal intervals vary wildly
-            // (median can shrink to a couple seconds). Configurable via `MinimumGapSeconds`.
-            long medianBasedTicks = (long)(result.ExpectedInterval.Ticks * GapThresholdMultiplier);
-            TimeSpan gapThreshold = TimeSpan.FromTicks(
-                Math.Max(medianBasedTicks, _minGapDuration.Ticks));
+            // Threshold = max(p90(intervals) × multiplier, minGapDuration).
+            // p90 (not median×1.5 as before Phase 10): deadband tags have heavy-tailed
+            // interval distributions — TEMP_02_WS logs every ~6 min (median) but normally
+            // stays quiet for up to an hour. A median-based threshold flagged every normal
+            // quiet period as a gap (41% coverage shown for a healthy tag). If ≥10% of a
+            // tag's intervals reach a duration, that duration IS the tag's cadence; only
+            // silence well beyond it is a gap. p90 (not p95) plus the below-max index cap
+            // in Percentile keeps rare true outages out of the cadence estimate.
+            TimeSpan p90 = Percentile(deltas, 0.90);
+            TimeSpan gapThreshold = TimeSpan.FromTicks(Math.Max(
+                (long)(p90.Ticks * _thresholdMultiplier), _minGapDuration.Ticks));
+            result.GapThreshold = gapThreshold;
 
             // Detect gaps
             TimeSpan totalMissing = TimeSpan.Zero;
@@ -241,6 +262,17 @@ namespace HistorianSyncTool.Services
             return sorted.Count % 2 == 0
                 ? TimeSpan.FromTicks((sorted[mid - 1].Ticks + sorted[mid].Ticks) / 2)
                 : sorted[mid];
+        }
+
+        internal static TimeSpan Percentile(List<TimeSpan> spans, double pct)
+        {
+            if (spans.Count == 0) return TimeSpan.Zero;
+            var sorted = spans.OrderBy(s => s.Ticks).ToList();
+            // Cap below the max so one true outage in a sparse window never gets
+            // absorbed into the cadence estimate.
+            int idx = Math.Min((int)(pct * sorted.Count), sorted.Count - 2);
+            if (idx < 0) idx = 0;
+            return sorted[idx];
         }
     }
 }

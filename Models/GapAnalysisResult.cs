@@ -11,6 +11,14 @@ namespace HistorianSyncTool.Models
         public DateTime FirstTimestamp { get; set; }
         public DateTime LastTimestamp { get; set; }
         public TimeSpan ExpectedInterval { get; set; }
+
+        /// <summary>
+        /// The computed per-tag gap rule: silence longer than this counted as a gap
+        /// (max(p95 of intervals × multiplier, MinimumGapSeconds)). Surfaced in the UI
+        /// so "why is/isn't this a gap" is never a black box.
+        /// </summary>
+        public TimeSpan GapThreshold { get; set; }
+
         public TimeSpan LargestGapDuration { get; set; }
         public TimeSpan TotalMissingDuration { get; set; }
 

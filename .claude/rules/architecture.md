@@ -13,13 +13,18 @@ Both are `ServerConnection` objects. Most operations require both to be connecte
 hostname is derived from the primary at startup: if the primary ends with `PC2`, the secondary
 strips that suffix; otherwise `PC2` is appended.
 
-## UI Layer (WinForms)
-- Single form: `Main` (inherits `Form`)
-- Entry point: `Program.cs` → `Application.Run(new Main())`
-- All button click handlers are named `On_cmd<Action>_Click`
-- Status feedback goes to `tsStatus` (status strip label) and `txt_Log` (textbox log)
-- Grids: `dataGridDataPrimary`, `dataGridDataSecondary`, `dataGridCompare`
-- Tag selectors: `cboTagsPrimary`, `cboTagsSecondary`
+## UI Layer (WinForms) — Phase 9 layout
+- Main form: `Forms/MainForm` (+ dialogs: TagSelection, BidirectionalBackfill,
+  SyncReport, BackfillHistory, SchedulerSettings, Progress)
+- Layout: left sidebar (connection / evaluation period / tags with link toggle),
+  **center top = full-width SYNC TIMELINE** (`GapTimeline`: both servers on one shared
+  time axis + copy-candidates strip + click-to-zoom), center = data grids + VIEW/BACKFILL
+  action column, collapsible activity log; **right panel = MISSING DATA** (per-direction
+  summary + cross-server diff table, row-click zooms the timeline)
+- Every long operation runs behind the modal `ProgressDialog` (single Cancel, 400 ms
+  delayed show); there is no status-bar progress bar or separate Stop button anymore
+- Status feedback: `lblStatus` (status bar) + `txtLog` (activity log); both also feed
+  the progress dialog's detail line while an operation runs
 - **Do not use WPF.** v1 had dead WPF files (`MainWindow.xaml`, `App.xaml`) — v2 must not include them.
 
 ## v1 Problem: Monolithic Main.cs
@@ -31,9 +36,12 @@ Extract these three services from the form class:
 
 | Service | Responsibility |
 |---|---|
-| `HistorianConnectionService` | Open/close `ServerConnection`, expose connection state |
-| `HistorianDataService` | All `IData` and `ITags` queries and writes |
-| `GapAnalysisService` | Gap detection, batch planning, backfill orchestration |
+| `HistorianConnectionService` | Open/close `ServerConnection`, optional config login, connection state |
+| `HistorianDataService` | All `IData` and `ITags` queries and writes (retry-wrapped) |
+| `GapAnalysisService` | Gap detection (per-tag p90 rule), batch planning, feasibility marking |
+| `SyncPlanner` | THE definition of "what would a backfill copy" (Phase 10): per-tag aligned-vs-independent stream detection, outage-window planning; shared by backfill, previews, timeline strip and table (tested) |
+| `IntervalBuilder` | Pure interval math for the timeline: merge points→ranges, percentile cadence, complement, intersect (tested) |
+| `ScheduleService` / `ScheduleLogger` / `BackfillJournalService` | Unattended runs, audit log, revert journal |
 
 The form should only wire UI events and delegate to services. Services must have no `Form`/`Control`
 dependencies so they can be unit tested independently.
@@ -41,9 +49,12 @@ dependencies so they can be unit tested independently.
 ## Data Flow per Use Case
 
 ### Connect
-1. User enters primary hostname → secondary derived automatically
-2. `HistorianConnectionService` creates two `ServerConnection` instances
-3. Status reflected in status strip + log
+1. User enters both servers (persisted): `host`, `host:port`, `ip` or `ip:port`
+   (`HostInputParser`). IPs are handled by `ProficyEndpoint.PrepareForIp` — lenient
+   DNS-identity verifier, TLS + cert mode unchanged (see `historian-api.md`)
+2. `HistorianConnectionService.Open` sets the port for the next connect and creates
+   the `ServerConnection` (optional app.config login for remote clients)
+3. Status reflected in status bar + log; progress dialog appears if it takes > 400 ms
 
 ### Browse Tags
 1. `ITags.Query` with `TagnameMask` filter and `DataType = Float`
@@ -59,34 +70,39 @@ dependencies so they can be unit tested independently.
 2. Align by timestamp into `SortedDictionary<DateTime, CompareRowData>`
 3. Missing side shown as `"missing"` in grid
 
-### Per-Tag Gap Analysis (Phase 6 — display only)
-1. `RunGapAnalysis` reads the tag SELECTED per side (`cboPrimary`/`cboSecondary`);
-   falls back to `SyncTagName` (HistSync) if a combo is empty
-2. `Analyze` per server: compute median interval, detect gaps with
-   `threshold = max(median × 1.5, MinimumGapSeconds)` to suppress deadband noise
-3. Empty-server (0 samples) case: emit one whole-period `GapWindow` so it shows as 0% red
-4. Mark `CanBackfill` per batch by checking the OPPOSITE server has same-tag data
-5. Results stored in `_lastPrimaryResult` / `_lastSecondaryResult` — drive the coverage
-   bars, gap grid, and `SyncReportDialog` header stats only
+### Per-Tag Gap Analysis (display only; Phase 9 feeds the SYNC TIMELINE)
+1. `RunGapAnalysis` reads the tag SELECTED per side (`cboPrimary`/`cboSecondary`,
+   normally mirrored by the tag link); falls back to `SyncTagName` if a combo is empty
+2. `Analyze` per server: median interval, `threshold = max(median × 1.5, MinimumGapSeconds)`;
+   empty server ⇒ one whole-period `GapWindow`; `CanBackfill` marked per batch from
+   the OPPOSITE server's data
+3. The worker also prepares all timeline data off-thread: fillable/unfillable segments
+   (`IntervalBuilder.SplitByFeasibility`), copy-candidate runs (whole-second diff),
+   and the journal-driven "backfilled by this tool" bands
+4. Results drive the SYNC TIMELINE, the missing-data table and the summary — never
+   backfill planning
 
 ### Multi-Tag Backfill — direct timestamp comparison (Phase 6)
 Gap analysis is **not consulted** for backfill planning. That path was replaced because
 the `MinimumGapSeconds` floor (needed for deadband noise) also hid isolated missing
 samples. Instead:
 
-1. Gap analysis must have detected gaps on the target side (precondition only)
-2. User clicks Copy button → `TagSelectionDialog` shows tags on BOTH servers with
-   per-tag "Will copy" counts from direct comparison
+1. User clicks a Copy button (`TagSelectionDialog`, one direction) or Preview & Backfill
+   (`BidirectionalBackfillDialog`, both directions); both show per-tag "Will copy"
+   counts from `SyncPlanner` (identical to what the backfill writes) + mini timeline
+2. Evaluation end is clamped to `now − LiveEdgeGraceSeconds` on every write path
+   (dialog stats AND the backfill use the same clamped range)
 3. `ExecuteBackfill` per tag:
-   a. Read source samples in `[evalFrom, evalTo]`
-   b. Read target samples in same range
-   c. Build `HashSet<long>` of target ticks; find source timestamps not in it
-   d. Group missing samples into buckets by `BatchSize` (`SampleBucketer.GroupByBucket`)
-   e. For each bucket: write + verify (verify window widened ±1s for Historian precision)
-4. `BatchesSucceeded` gated on both `writeOk` AND `verifyOk`
-5. Per-tag progress in status bar; progress bar resets per tag
-6. `TagBackfillResult` tracks per-tag stats; `SyncRunReport` aggregates; modal
-   `SyncReportDialog` pops up after each run with CSV/TXT export
+   a. Read source + target samples in `[evalFrom, evalTo]`
+   b. Missing = `SyncPlanner.Plan(...)` — aligned streams → exact whole-second diff;
+      independent collector streams → only real target outages (see `sync-workflow.md`)
+   c. Group into buckets by `BatchSize` (`SampleBucketer.GroupByBucket`)
+   d. Per bucket: write (quality preserved) + verify each written second is present
+4. `BatchesSucceeded` gated on both `writeOk` AND `verifyOk`; written seconds journaled
+5. Progress in the modal `ProgressDialog` (tag x/y + batch x/y); cancel stops at the
+   batch boundary and asks keep-or-revert
+6. `TagBackfillResult` per tag; `SyncRunReport` aggregates; modal `SyncReportDialog`
+   with CSV/TXT export (suppressed for unattended runs)
 7. `AutoRefreshAfterBackfill` re-runs gap analysis AND re-reads loaded data grids
 
 The old gap-window-based implementation is preserved in `_backup/batch-based-backfill-phase6/`
@@ -114,3 +130,5 @@ appends a single-line audit entry to `logs/schedule-YYYY-MM.log`.
 UI surface: `lblSchedule` clickable status-bar label shows "Schedule: off" /
 "Next run: HH:mm" / "Schedule: running…" and opens `SchedulerSettingsDialog`.
 Tray icon was scoped out for v1 — the status-bar indicator covers the same need.
+Scheduled runs are fully headless (`_suppressOpDialog` — no modal progress dialog).
+Details: [`scheduling-and-revert.md`](scheduling-and-revert.md).

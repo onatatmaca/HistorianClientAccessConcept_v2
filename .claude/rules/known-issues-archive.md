@@ -1,0 +1,94 @@
+# Known Issues — v2 Archive (Phases 5–6, resolved & stable)
+
+Resolved v2 issues old enough that they no longer change day-to-day work, moved here
+from `known-issues.md` to keep that file under 200 lines. Newer items (Phase 8+) stay
+in [`known-issues.md`](known-issues.md); v1 pitfalls live in
+[`known-issues-v1.md`](known-issues-v1.md).
+
+---
+
+## BUG: Per-Tag Gap Analysis Produces False Gaps on Bimodal/Deadband Data
+**Location:** `GapAnalysisService.Analyze`
+
+Variable-interval tags (bimodal or deadband) made the median-based detector latch onto
+the fast interval and flag every quiet stretch as a gap (hundreds of 0m16s "gaps", 17%
+coverage that should be ~95%). Phase 5 restricted analysis to HistSync; Phase 6 re-enabled
+per-tag with `threshold = max(median × 1.5, MinimumGapSeconds)`; the floor then hid
+isolated missing samples, so the **final fix** decoupled backfill from gap windows
+entirely: backfill diffs actual timestamps between servers; gap analysis is display-only.
+
+## BUG: DateTimePicker Shows Arrows Instead of Calendar (fixed Phase 5)
+`MakeDtp()` had `ShowUpDown = true`; changed to `false`.
+
+## BUG: Gap Grid Duration Column Cut Off (fixed Phase 5)
+Grid used `FillWeight` without `AutoSizeColumnsMode = Fill`; added it.
+
+## DESIGN: No UI Refresh After Backfill (fixed Phase 5/6)
+Added `AutoRefreshAfterBackfill()` → re-runs gap analysis (Phase 5) and re-reads the
+data grids + exits compare mode (Phase 6).
+
+## BUG: Verification failure was counted as success (fixed Phase 6)
+`BatchesSucceeded++` ran before `VerifyWrite`; now gated on `writeOk && verifyOk`;
+verification failure increments `BatchesFailed`.
+
+## BUG: CancellationTokenSource leaked per operation (fixed Phase 6)
+Every handler allocated a new CTS without disposing the old; `ResetCts()` disposes
+then re-allocates, `OnFormClosing` disposes the final one.
+
+## BUG: Empty-server side blocked backfill (fixed Phase 6)
+`Analyze` returned early with no gaps for a 0-sample server, so nothing was offered
+for backfill even when the other side had data. Now emits one whole-period `GapWindow`
+(split into batches) so feasibility marking works; the preview flow offers only
+directions with batches.
+
+## BUG: Verify false-negative from sub-second rounding (fixed Phase 6)
+Verify window `[firstTime, lastTime + 1 tick)` missed samples because Historian stores
+second-precision timestamps (12:54:30.123 is stored as 12:54:30, before the query
+start). Widened to `[first − 1s, last + 1s]`. (Phase 8 later made verify per-sample
+at whole-second resolution — see `known-issues.md`.)
+
+## NOTE: Proficy DataSet is not IDisposable (closed Phase 6)
+Per GE docs, `DataSet` inherits `Dictionary<string,IDataSamples>` and adds no
+interfaces — no `using` needed, no leak.
+
+---
+
+# Bugs Fixed vs v1 (historical tracking table, moved from roadmap.md)
+
+| Bug | Phase Fixed | Notes |
+|-----|-------------|-------|
+| ServerConnection never disposed | 1 | Fixed in `HistorianConnectionService.Dispose()` |
+| Log uses dtTimestamp instead of DateTime.Now | 1 | Fixed in new `Log()` helper |
+| HasSampleInRange strict boundary exclusion | 2 | Use `>=` start, `<` end — binary search in MarkBackfillFeasibility |
+| TagQueryParams not reset between servers in stats | 1 | New params instance per server |
+| All ops on UI thread | 1 | async/await + Task.Run in service calls |
+| No retry on API calls | 2 | Retry helper in HistorianDataService (configurable via app.config) |
+| HistSync tag name hardcoded | 2 | Moved to app.config `SyncTagName` |
+| Batch size hardcoded (10 min) | 2 | Moved to app.config `BatchSizeMinutes` |
+| Quality forced to Good on backfill writes | 2 | `WriteFloatSamplesWithQuality` preserves source quality |
+| Bare catch blocks in disconnect | audit | Added Trace.TraceWarning logging |
+| SetBusy re-entrancy (buttons not disabled) | audit | Action buttons disabled during ops |
+| ReadRawInRange missing quality | audit | Now returns `(Time, Value, Quality)` tuple |
+| Unsorted input to GapAnalysisService | audit | Auto-sorts if needed |
+| Coverage wildly wrong on bimodal tags | 5 | HistSync-only gap analysis eliminated false gaps |
+| Radio buttons confused gap analysis scope | 5 | Removed — HistSync-as-master (per-tag returned in Phase 6) |
+| DateTimePicker showed arrows not calendar | 5 | `ShowUpDown = false` |
+| Gap grid Duration column cut off | 5 | `AutoSizeColumnsMode = Fill` |
+| No UI refresh after backfill | 5 | `AutoRefreshAfterBackfill()` re-runs gap analysis |
+| Single-tag backfill too limiting | 5 | Multi-tag via `TagSelectionDialog` |
+| Data grids stayed stale after backfill | 6 | `AutoRefreshAfterBackfill` also re-reads primary/secondary grids |
+| Verify-write failure counted as success | 6 | `BatchesSucceeded++` gated on writeOk AND verifyOk |
+| CancellationTokenSource leaked per op | 6 | `ResetCts()` disposes before re-allocating |
+| Gap grid columns cramped in right panel | 6 | Reduced columns; hover tooltip carries full detail |
+| No pre-flight stats before backfill | 6 | `TagSelectionDialog` per-tag source/target/diff stats |
+| No detailed post-backfill summary | 6 | `SyncReportDialog` with per-tag grid + CSV/TXT export |
+| Empty-server gap detection blocked backfill | 6 | Whole-period gap emitted when sample count is 0 |
+| Deadband tags produced hundreds of false gaps | 6 | `MinimumGapSeconds` floor (default 120s) |
+| Isolated missing samples below gap floor never copied | 6 | Backfill switched to direct timestamp comparison |
+| Verify false-negative from sub-second rounding | 6 | Verify window widened to ±1s |
+| Backfill journal never saved (silent serialization crash) | 8 | `RevertedLocal` made nullable |
+| Backfill re-copies samples forever; false "succeeded" | 8 | Diff + verify at whole-second resolution |
+| Backfill "forever" on live servers (in-flight samples) | 9 | Live-edge clamp: eval end capped at now − `LiveEdgeGraceSeconds` |
+| Gap analysis read to end of archive | 9 | `SafeReadTimes` now uses `ReadRawInRange` |
+| Two stop/cancel buttons + hidden progress bar | 9 | Single modal `ProgressDialog` with one Cancel |
+| Gaps hard to find/compare across servers | 9 | Full-width dual-track `GapTimeline` + copy strip + click-zoom |

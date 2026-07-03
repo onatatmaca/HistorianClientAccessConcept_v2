@@ -40,23 +40,32 @@ HistorianClientAccessConcept_v2/
 ├── HistorianSyncTool.sln
 ├── HistorianSyncTool.csproj
 ├── Program.cs                       ← WinForms entry point
-├── Forms/                           ← MainForm, TagSelectionDialog, SyncReportDialog,
-│                                      SchedulerSettingsDialog, BackfillHistoryDialog
+├── Forms/                           ← MainForm, TagSelectionDialog, BidirectionalBackfillDialog,
+│                                      SyncReportDialog, SchedulerSettingsDialog,
+│                                      BackfillHistoryDialog, ProgressDialog
 ├── Services/                        ← HistorianConnectionService, HistorianDataService,
-│                                      GapAnalysisService, RetryHelper, SampleFilter,
-│                                      SampleBucketer (pure-logic seams with unit tests),
-│                                      ScheduleService, ScheduleLogger, BackfillJournalService
+│                                      GapAnalysisService, SyncPlanner (backfill planning:
+│                                      aligned vs independent streams), RetryHelper,
+│                                      SampleFilter, SampleBucketer, IntervalBuilder,
+│                                      HostInputParser (pure-logic seams with unit tests),
+│                                      ProficyEndpoint (IP/port connect), ScheduleService,
+│                                      ScheduleLogger, BackfillJournalService
 ├── Models/                          ← GapAnalysisResult, GapWindow, GapBatch,
 │                                      SyncRunReport, TagBackfillResult, ServerStats,
-│                                      BackfillJournalEntry / BackfillJournalTag
+│                                      BackfillJournalEntry / BackfillJournalTag,
+│                                      TimelineData (TimeRange, TimelineTrackData, CopyableSegment)
 ├── UI/                              ← AppTheme + Controls (FlatButton, CoverageBar,
-│                                      SectionHeader, ConnectionDot, CollapsiblePanel)
+│                                      GapTimeline, SectionHeader, ConnectionDot,
+│                                      CollapsiblePanel)
+├── lib/                             ← Local Proficy DLL copy for building WITHOUT the
+│                                      Historian client installed (gitignored; build with
+│                                      dotnet msbuild /p:ReferencePath=<repo>\lib)
 ├── _backup/                         ← Reference-only archived code (NOT compiled).
 │                                      Currently holds the pre-direct-comparison
 │                                      batch-based backfill implementation with a
 │                                      README explaining revert paths.
-├── HistorianSyncTool.Tests/         ← MSTest project (GapAnalysisService +
-│                                      RetryHelper + SampleFilter + SampleBucketer)
+├── HistorianSyncTool.Tests/         ← MSTest project (GapAnalysisService + RetryHelper
+│                                      + SampleFilter + SampleBucketer + IntervalBuilder)
 ├── logs/                            ← Created at runtime — rolling monthly schedule
 │                                      audit (`schedule-YYYY-MM.log`) + per-run
 │                                      revert journal (`backfill-journal/{id}.json`)
@@ -72,10 +81,13 @@ All detailed conventions, patterns, and domain knowledge live in `.claude/rules/
 | [`architecture.md`](.claude/rules/architecture.md) | Dual-server design, service-layer goals, data flow |
 | [`csharp-conventions.md`](.claude/rules/csharp-conventions.md) | C# coding conventions (scoped to `**/*.cs`) |
 | [`historian-api.md`](.claude/rules/historian-api.md) | Proficy API patterns, query types, write patterns |
-| [`sync-workflow.md`](.claude/rules/sync-workflow.md) | Gap analysis, backfill, HistSync tag behavior |
-| [`known-issues.md`](.claude/rules/known-issues.md) | v2 bugs fixed (phases 5–6) + open deferred items |
+| [`sync-workflow.md`](.claude/rules/sync-workflow.md) | Gap analysis, sync timeline, backfill, preview dialogs |
+| [`scheduling-and-revert.md`](.claude/rules/scheduling-and-revert.md) | Unattended scheduler (Phase 7) + revert/undo journal (Phase 8) |
+| [`known-issues.md`](.claude/rules/known-issues.md) | v2 bugs fixed (phase 8+) + open deferred items |
+| [`known-issues-archive.md`](.claude/rules/known-issues-archive.md) | Resolved v2 issues (phases 5–6) + v1-bug tracking table |
 | [`known-issues-v1.md`](.claude/rules/known-issues-v1.md) | v1 historical pitfalls — reference so v2 doesn't regress |
 | [`roadmap.md`](.claude/rules/roadmap.md) | Phase completion status and next items |
+| [`test-environment.md`](.claude/rules/test-environment.md) | Test Historian servers, Genthin data ranges, MigrateIHA |
 
 ## Documentation Protocol
 

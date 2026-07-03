@@ -158,5 +158,14 @@ namespace HistorianSyncTool.Properties
             get { return (string)this["ScheduleTagList"]; }
             set { this["ScheduleTagList"] = value; }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool TagLinkEnabled
+        {
+            get { return (bool)this["TagLinkEnabled"]; }
+            set { this["TagLinkEnabled"] = value; }
+        }
     }
 }

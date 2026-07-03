@@ -46,6 +46,20 @@ namespace HistorianSyncTool.Forms
 
         private CancellationTokenSource _cts;
 
+        // ── Per-tag mini timeline (source vs target coverage + what will be copied) ──
+        private readonly GapTimeline _tagTimeline;
+        private readonly Label _lblTimelineTag;
+        private readonly Dictionary<string, TagPreview> _previews =
+            new Dictionary<string, TagPreview>(StringComparer.OrdinalIgnoreCase);
+
+        private sealed class TagPreview
+        {
+            public double SrcCoverage, TgtCoverage;
+            public int SrcCount, TgtCount;
+            public List<TimeRange> SrcFill, SrcUnfill, TgtFill, TgtUnfill;
+            public List<CopyableSegment> Copyable;
+        }
+
         public List<string> SelectedTags { get; private set; } = new List<string>();
 
         /// <summary>
@@ -79,8 +93,8 @@ namespace HistorianSyncTool.Forms
 
             // ── Form ──────────────────────────────────────────────────────────────
             Text            = "Select Tags for Backfill";
-            Size            = new Size(820, 560);
-            MinimumSize     = new Size(660, 420);
+            Size            = new Size(820, 700);
+            MinimumSize     = new Size(660, 560);
             StartPosition   = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox     = false;
@@ -196,12 +210,42 @@ namespace HistorianSyncTool.Forms
             pnlButtons.Controls.Add(_btnOk);
             pnlButtons.Controls.Add(_btnCancel);
 
+            // ── Per-tag timeline (bottom): source vs target coverage for the selected
+            //    tag on one shared axis; amber = exactly what this backfill would copy.
+            var pnlTagTimeline = new Panel
+            {
+                Dock = DockStyle.Bottom, Height = 158,
+                BackColor = AppTheme.Surface, Padding = new Padding(12, 2, 12, 6)
+            };
+            pnlTagTimeline.Paint += (s, e) =>
+                e.Graphics.DrawLine(new Pen(AppTheme.Border), 0, 0, pnlTagTimeline.Width, 0);
+
+            _lblTimelineTag = new Label
+            {
+                Text = "TAG TIMELINE — select a tag above",
+                Dock = DockStyle.Top, Height = 22,
+                Font = AppTheme.SectionLabel, ForeColor = AppTheme.Navy,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            _tagTimeline = new GapTimeline
+            {
+                Dock = DockStyle.Fill,
+                Compact = true,
+                AllowZoom = false
+            };
+            _tagTimeline.Clear("Select a tag above to see where its data sits on both servers.");
+            pnlTagTimeline.Controls.Add(_tagTimeline);     // Fill
+            pnlTagTimeline.Controls.Add(_lblTimelineTag);  // Top
+
             // ── Layout (add in reverse dock order) ────────────────────────────────
-            Controls.Add(_grid);         // Fill — added first
-            Controls.Add(_progress);     // Top
-            Controls.Add(_lblProgress);  // Top
-            Controls.Add(_lblSummary);   // Top
-            Controls.Add(pnlButtons);    // Bottom
+            Controls.Add(_grid);           // Fill — added first
+            Controls.Add(_progress);       // Top
+            Controls.Add(_lblProgress);    // Top
+            Controls.Add(_lblSummary);     // Top
+            Controls.Add(pnlTagTimeline);  // Bottom (inner)
+            Controls.Add(pnlButtons);      // Bottom (outermost)
+
+            _grid.SelectionChanged += (s, e) => ShowPreviewForSelection();
 
             AcceptButton = _btnOk;
             CancelButton = _btnCancel;
@@ -242,6 +286,7 @@ namespace HistorianSyncTool.Forms
                 DateTime? writeFirst = null;
                 DateTime? writeLast = null;
                 string errorText = null;
+                TagPreview preview = null;
 
                 try
                 {
@@ -256,22 +301,24 @@ namespace HistorianSyncTool.Forms
                         tgtCount = tgtSamples.Count;
                     }
                     catch { tgtSamples = null; /* leave tgtCount=0 */ }
+                    if (tgtSamples == null) tgtSamples = new List<(DateTime, float, double)>();
 
-                    // Direct-comparison diff at whole-second resolution — must match the
-                    // backfill's own comparison (SampleFilter.ToSecondTicks) so the preview's
-                    // "Will copy" count agrees with what ExecuteBackfill actually copies.
-                    var tgtTicks = new HashSet<long>(
-                        (tgtSamples ?? new List<(DateTime, float, double)>())
-                            .Select(s => SampleFilter.ToSecondTicks(s.Time)));
-                    foreach (var s in srcSamples)
+                    // SyncPlanner is the same planner ExecuteBackfill uses, so the
+                    // preview's "Will copy" count is exactly what a backfill would write
+                    // (aligned streams → exact whole-second diff; independent collector
+                    // streams → only real target outages, no phantom duplicates).
+                    var plan = SyncPlanner.PlanWithConfig(
+                        srcSamples.Select(s => s.Time).ToList(),
+                        tgtSamples.Select(s => s.Time).ToList(),
+                        _rangeStart, _rangeEnd);
+                    missingCount = plan.ToCopy.Count;
+                    if (plan.ToCopy.Count > 0)
                     {
-                        if (!tgtTicks.Contains(SampleFilter.ToSecondTicks(s.Time)))
-                        {
-                            missingCount++;
-                            if (writeFirst == null || s.Time < writeFirst) writeFirst = s.Time;
-                            if (writeLast  == null || s.Time > writeLast)  writeLast  = s.Time;
-                        }
+                        writeFirst = plan.ToCopy[0];
+                        writeLast  = plan.ToCopy[plan.ToCopy.Count - 1];
                     }
+
+                    preview = BuildPreview(srcSamples, tgtSamples, plan);
                 }
                 catch (Exception ex)
                 {
@@ -285,8 +332,10 @@ namespace HistorianSyncTool.Forms
                 DateTime? wf = writeFirst, wl = writeLast;
                 int sc = srcCount, tc = tgtCount;
                 string err = errorText;
+                TagPreview pv = preview;
                 BeginInvoke((Action)(() =>
                 {
+                    if (pv != null) _previews[tag] = pv;
                     if (row >= _grid.Rows.Count) return;
                     if (err != null)
                     {
@@ -327,6 +376,87 @@ namespace HistorianSyncTool.Forms
         {
             for (int i = 0; i < _grid.Rows.Count; i++)
                 _grid.Rows[i].Cells["Sel"].Value = state;
+        }
+
+        /// <summary>
+        /// Distills one tag's sample lists into merged intervals for the mini timeline
+        /// (same semantics as the main SYNC TIMELINE: red = other side has it, gray =
+        /// missing on both, amber = exactly what this backfill would copy).
+        /// </summary>
+        private TagPreview BuildPreview(
+            List<(DateTime Time, float Value, double Quality)> srcSamples,
+            List<(DateTime Time, float Value, double Quality)> tgtSamples,
+            SyncPlan plan)
+        {
+            var srcTimes = srcSamples.Select(s => s.Time).ToList();
+            var tgtTimes = tgtSamples.Select(s => s.Time).ToList();
+
+            // Per-side gap rule (same statistic the gap detector uses) so the green
+            // rendering agrees with what actually counts as missing data for this tag.
+            var cfg = SyncPlanner.ReadConfig();
+            var srcCov  = IntervalBuilder.CoverageIntervals(srcTimes,
+                SyncPlanner.GapRule(srcTimes, cfg.Floor, cfg.Multiplier));
+            var tgtCov  = IntervalBuilder.CoverageIntervals(tgtTimes,
+                SyncPlanner.GapRule(tgtTimes, cfg.Floor, cfg.Multiplier));
+            var srcGaps = IntervalBuilder.Complement(_rangeStart, _rangeEnd, srcCov);
+            var tgtGaps = IntervalBuilder.Complement(_rangeStart, _rangeEnd, tgtCov);
+
+            double total = Math.Max(1, (_rangeEnd - _rangeStart).Ticks);
+            var preview = new TagPreview
+            {
+                SrcCount    = srcTimes.Count,
+                TgtCount    = tgtTimes.Count,
+                SrcCoverage = 1.0 - srcGaps.Sum(gp => (double)gp.Duration.Ticks) / total,
+                TgtCoverage = 1.0 - tgtGaps.Sum(gp => (double)gp.Duration.Ticks) / total,
+                SrcFill     = IntervalBuilder.Intersect(srcGaps, tgtCov),
+                SrcUnfill   = IntervalBuilder.Intersect(srcGaps, tgtGaps),
+                TgtFill     = IntervalBuilder.Intersect(tgtGaps, srcCov),
+                TgtUnfill   = IntervalBuilder.Intersect(tgtGaps, srcGaps),
+                Copyable    = SyncPlanner.ToSegments(
+                    plan,
+                    toSecondary: _targetLabel == "Secondary",
+                    description: $"This backfill would copy these sample(s) from {_sourceLabel} to {_targetLabel}")
+            };
+            return preview;
+        }
+
+        /// <summary>Shows the mini timeline for the tag selected in the grid.</summary>
+        private void ShowPreviewForSelection()
+        {
+            if (_grid.SelectedRows.Count == 0) return;
+            string tag = _grid.SelectedRows[0].Cells["Tag"].Value as string;
+            if (string.IsNullOrEmpty(tag)) return;
+
+            _lblTimelineTag.Text = $"TAG TIMELINE — {tag}";
+
+            TagPreview pv;
+            if (!_previews.TryGetValue(tag, out pv))
+            {
+                _tagTimeline.Clear("still comparing this tag…");
+                return;
+            }
+
+            var top = new TimelineTrackData
+            {
+                Label            = $"SOURCE — {_sourceLabel} · {pv.SrcCount:N0} samples",
+                TooltipName      = $"Source ({_sourceLabel})",
+                CoverageRatio    = pv.SrcCoverage,
+                HasData          = pv.SrcCount > 0,
+                FeasibilityKnown = true,
+                FillableGaps     = pv.SrcFill,
+                UnfillableGaps   = pv.SrcUnfill
+            };
+            var bottom = new TimelineTrackData
+            {
+                Label            = $"TARGET — {_targetLabel} · {pv.TgtCount:N0} samples",
+                TooltipName      = $"Target ({_targetLabel})",
+                CoverageRatio    = pv.TgtCoverage,
+                HasData          = pv.TgtCount > 0,
+                FeasibilityKnown = true,
+                FillableGaps     = pv.TgtFill,
+                UnfillableGaps   = pv.TgtUnfill
+            };
+            _tagTimeline.SetData(_rangeStart, _rangeEnd, top, bottom, pv.Copyable);
         }
 
         private void BtnOk_Click(object sender, EventArgs e)

@@ -11,67 +11,15 @@ description: Phase completion status and next items for v2 development
 
 ---
 
-## Phase 1 — Service Layer Extraction
-Extract domain logic out of `Main.cs` into independently testable classes.
-
-- [x] Create `HistorianConnectionService`
-  - Owns both `ServerConnection` instances
-  - Exposes `ConnectPrimary(host)`, `ConnectSecondary(host)`, `IsConnected(side)`
-  - Implements `IDisposable`, calls `Disconnect()` on dispose
-- [x] Create `HistorianDataService`
-  - All `IData` and `ITags` calls move here
-  - Returns plain C# types (not Historian API types) where possible
-  - No `Form` or `Control` dependencies
-- [x] Create `GapAnalysisService`
-  - `AnalyzeGaps(samples) → GapAnalysisResult`
-  - `PlanBatches(gapWindows, batchSize) → List<GapBatch>`
-  - `CheckBackfillFeasibility(batch, otherServerSamples) → bool`
-- [x] Move model classes to `Models/` folder
-  - `GapAnalysisResult.cs`, `GapWindow.cs`, `GapBatch.cs`
-- [x] Slim `Main.cs` to UI wiring only (event handlers delegate to services)
-
----
-
-## Phase 2 — Selective Synchronization
-Replace full-range copy with gap-targeted, backfill-only writes.
-
-- [x] Only write batches where `CanBackfill = true`
-- [x] Preserve original sample quality (do not force `DataQuality.Good`)
-- [x] Make `HistSync` tag name configurable (app.config + Properties.Settings)
-- [x] Make batch size configurable (default: 10 minutes, read from app.config)
-- [x] Add per-batch retry with exponential backoff (max 3 attempts)
-- [x] Surface run-report: gaps found, batches attempted, batches succeeded, samples written
-
----
-
-## Phase 3 — Read-After-Write Verification
-Confirm data was actually written before marking a batch as done.
-
-- [x] After each batch write, re-query the target for that time range
-- [x] Compare returned sample count to written sample count
-- [x] Log verification result per batch (pass / mismatch / no data)
-- [x] Mark batch `Verified` or `VerificationFailed` in run-report
-
----
-
-## Phase 4 — Automated Tests
-Make core logic testable without the UI or a live Historian instance.
-
-- [x] Add a test project (`HistorianSyncTool.Tests`)
-- [x] Unit test `GapAnalysisService` with synthetic sample lists
-  - Median interval calculation
-  - Gap detection at 1.5× threshold
-  - Batch boundary correctness (half-open interval)
-  - Coverage ratio calculation
-  - Backfill feasibility marking
-  - Sort validation on unsorted input
-- [x] Unit test `HistorianDataService` via helper extraction (Proficy-free seams):
-  - `RetryHelper` — pure retry policy (success on first try, failures, exponential
-    backoff timing, exception wrapping, argument validation)
-  - `SampleFilter` — parse `object → float`, half-open `[start, end)` clipping,
-    null/unparseable drop, early break on out-of-range time
-  - `SampleBucketer` — sample grouping behaviour (extracted from `MainForm`)
-- [ ] Integration test harness (optional): requires live Historian, tagged as `[Integration]`
+## Phases 1–4 — Foundations (all complete; condensed)
+- [x] **P1 Service layer**: `HistorianConnectionService` (IDisposable),
+      `HistorianDataService`, `GapAnalysisService`, models to `Models/`, slim form
+- [x] **P2 Selective sync**: feasibility-gated writes, quality preserved, configurable
+      HistSync tag + batch size, retry w/ backoff, run-report
+- [x] **P3 Read-after-write verification**: per-batch re-query + verified/failed status
+- [x] **P4 Tests**: `HistorianSyncTool.Tests` — GapAnalysisService, RetryHelper,
+      SampleFilter, SampleBucketer
+- [ ] Integration test harness (optional): requires live Historian, tagged `[Integration]`
 
 ---
 
@@ -154,44 +102,75 @@ Right-panel polish, interactive timeline, VIEW/BACKFILL button groups, richer di
 - [x] Scheduler optional manual tag multiselect — `SchedulerSettingsDialog` adds
       a "specific tags" mode (CheckedListBox of shared tags) alongside the mask;
       persisted via `ScheduleUseTagList` + `ScheduleTagList`
-- [ ] Combined bidirectional Preview window — P→S and S→P "will copy" in one dialog
-- [ ] Clearer gap/tag table — "Server X has A→B that Y lacks → copy to Y", not raw batch counts
+- [x] Combined bidirectional Preview window — `BidirectionalBackfillDialog`: P→S and
+      S→P checklists side by side, per-tag "Will copy" via whole-second diff, single
+      combined report after running both directions
+- [x] Clearer gap/tag table — right-panel table is now the cross-server diff per
+      direction ("Missing on / Count / Period" + full-sentence tooltips; Phase 9 added
+      click-to-zoom)
 - [ ] System tray icon (still deferred)
 
 ---
 
-## Bugs Fixed vs v1 (track here as each is resolved)
+## Phase 9 — Boss feedback: findability, transparency, one progress surface
+All four issues raised in the 2026-07 review. Verified by screenshot on every surface.
 
-| Bug | Phase Fixed | Notes |
-|-----|-------------|-------|
-| ServerConnection never disposed | 1 | Fixed in `HistorianConnectionService.Dispose()` |
-| Log uses dtTimestamp instead of DateTime.Now | 1 | Fixed in new `Log()` helper |
-| HasSampleInRange strict boundary exclusion | 2 | Use `>=` start, `<` end — binary search in MarkBackfillFeasibility |
-| TagQueryParams not reset between servers in stats | 1 | New params instance per server |
-| All ops on UI thread | 1 | async/await + Task.Run in service calls |
-| No retry on API calls | 2 | Retry helper in HistorianDataService (configurable via app.config) |
-| HistSync tag name hardcoded | 2 | Moved to app.config `SyncTagName` |
-| Batch size hardcoded (10 min) | 2 | Moved to app.config `BatchSizeMinutes` |
-| Quality forced to Good on backfill writes | 2 | `WriteFloatSamplesWithQuality` preserves source quality |
-| Bare catch blocks in disconnect | audit | Added Trace.TraceWarning logging |
-| SetBusy re-entrancy (buttons not disabled) | audit | Action buttons disabled during ops |
-| ReadRawInRange missing quality | audit | Now returns `(Time, Value, Quality)` tuple |
-| Unsorted input to GapAnalysisService | audit | Auto-sorts if needed |
-| Coverage wildly wrong on bimodal tags | 5 | HistSync-only gap analysis eliminates false gaps from irregular tag intervals |
-| Radio buttons confused gap analysis scope | 5 | Removed — always use HistSync |
-| DateTimePicker showed arrows not calendar | 5 | `ShowUpDown = false` |
-| Gap grid Duration column cut off | 5 | `AutoSizeColumnsMode = Fill` |
-| No UI refresh after backfill | 5 | `AutoRefreshAfterBackfill()` re-runs gap analysis |
-| Single-tag backfill too limiting | 5 | Multi-tag via `TagSelectionDialog` |
-| Data grids stayed stale after backfill | 6 | `AutoRefreshAfterBackfill` also re-reads primary/secondary grids |
-| Verify-write failure counted as success | 6 | `BatchesSucceeded++` now gated on both `writeOk` AND `verifyOk` |
-| CancellationTokenSource leaked per op | 6 | New `ResetCts()` helper disposes before re-allocating |
-| Gap grid columns cramped in right panel | 6 | Reduced to 3 cols; hover tooltip surfaces full detail instead |
-| No pre-flight stats before backfill | 6 | `TagSelectionDialog` now shows per-tag source/target/batch stats |
-| No detailed post-backfill summary | 6 | New `SyncReportDialog` with per-tag grid + CSV/TXT export |
-| Empty-server gap detection blocked backfill | 6 | `Analyze` emits whole-period gap when sample count is 0 |
-| Deadband tags produced hundreds of false gaps | 6 | `MinimumGapSeconds` floor (default 120s) in threshold calc |
-| Isolated missing samples below gap floor never copied | 6 | Backfill now uses direct timestamp comparison, not gap windows |
-| Verify false-negative from sub-second rounding | 6 | Widened verify window to ±1s (Historian stores at second precision) |
-| Backfill journal never saved (silent serialization crash) | 8 | `RevertedLocal` made nullable — `DateTime.MinValue`→UTC crashed `DataContractJsonSerializer` in UTC+ zones |
-| Backfill re-copies samples forever; false "succeeded" | 8 | Diff + verify now whole-second (`SampleFilter.ToSecondTicks`); verify confirms each written second present |
+- [x] **SYNC TIMELINE** — full-width dual-track `GapTimeline` control (center top):
+      Primary + Secondary on one shared axis, adaptive date ticks, hover crosshair,
+      legend; red = other server has it, gray = missing on BOTH (unfillable),
+      blue band = backfilled by this tool (journal-driven, disappears on revert),
+      amber strip = copy candidates (whole-second diff, same as backfill)
+- [x] Click-to-zoom: any timeline segment or table row zooms the date range to it
+      (± 10 % padding); "⟲ zoom back" restores previous ranges (zoom stack)
+- [x] **Linked tag selection** — picking a tag auto-selects the same tag on the other
+      server (both directions), toggleable + persisted (`TagLinkEnabled`)
+- [x] **Modal progress dialog** — single Cancel (ESC works), delayed-show 400 ms,
+      per-tag + per-batch bars, elapsed time (no fake ETA); removed the status-bar
+      progress bar + Cancel and the separate Stop button; main window blocked during
+      operations; scheduled runs stay headless (`_suppressOpDialog`)
+- [x] Backfill cancel → stop at batch boundary, journal what was written, ask
+      **keep / revert now** (default keep)
+- [x] **Live-edge guard** — every write path clamps eval end to now −
+      `LiveEdgeGraceSeconds` (default 120 s): kills the "we can backfill forever"
+      loop caused by in-flight samples near now; analysis display not clamped
+- [x] Per-tag mini timeline in BOTH preview dialogs (click a tag row → coverage of
+      both servers + copy candidates for that tag)
+- [x] `SafeReadTimes` perf: `ReadRawInRange` instead of read-to-end-of-archive
+- [x] `IntervalBuilder` service (MergePoints/Complement/Intersect/CoverageIntervals/
+      SplitByFeasibility/BuildCopyableSegments) + `IntervalBuilderTests` (17 tests)
+- [x] Optional app.config Historian login (`HistorianUsername`/`HistorianPassword`)
+      for remote servers that reject empty usernames
+- [x] **IP + port support** — server fields accept `host[:port]` / `ip[:port]`
+      (`HostInputParser`; ports via `HistorianAddress.TcpPort`, IPs via
+      `ProficyEndpoint.PrepareForIp` lenient-identity path — TLS/cert mode
+      unchanged). Verified live against both test servers by IP with real data
+- [x] Docs restructured: `scheduling-and-revert.md` + `known-issues-archive.md`
+      split out to keep all rule files under 200 lines
+
+---
+
+## Phase 10 — Cadence-aware calculation system (2026-07 audit)
+Root-caused live: 41% coverage on healthy deadband tags + phantom diffs on
+independently-collecting redundant servers (see `known-issues.md`, measured on Genthin).
+
+- [x] Per-tag gap rule `max(p90(intervals) × GapThresholdMultiplier, MinimumGapSeconds)`
+      replaces median×1.5; rule shown on each timeline track ("gap rule: silence > 1h")
+- [x] **`SyncPlanner`** — single source of truth for "what would a backfill copy":
+      auto-detects aligned streams (exact-second diff, catches isolated misses) vs
+      independent collectors (fills only real target outages — no phantom duplicates);
+      wired into ExecuteBackfill, both previews, amber strip, missing-data table
+- [x] `ReadRawInRange` → bounded `RawByNumberQuery` chunks (stops at range end; never
+      abandons a server pagination cursor)
+- [x] Date/time edits + quick presets no longer auto-run analysis (only Analyze Gaps
+      button / zoom); tag changes still auto-analyze
+- [x] Sync Report shows Started/Finished/Duration; journal stores `CompletedLocal`;
+      Backfill History gained a Duration column
+- [x] `SyncPlannerTests` (14 tests) + 16-check local harness; verified live on
+      TEMP_02_WS (41% → 100%/100%, "In sync") and full 78-tag preview
+- [ ] Live write acceptance: run one real backfill + revert via the new planner
+
+---
+
+## Bugs Fixed vs v1
+Tracking table moved to [`known-issues-archive.md`](known-issues-archive.md)
+(kept growing past this file's 200-line budget).

@@ -4,6 +4,7 @@ using HistorianSyncTool.UI.Controls;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace HistorianSyncTool.Forms
@@ -71,17 +72,23 @@ namespace HistorianSyncTool.Forms
             _grid.ColumnHeadersDefaultCellStyle.Font      = AppTheme.SectionLabel;
             _grid.AlternatingRowsDefaultCellStyle.BackColor = AppTheme.RowAlt;
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Run time",   Name = "Run",     FillWeight = 20 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Mode",        Name = "Mode",    FillWeight = 12 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Direction",   Name = "Dir",     FillWeight = 26 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Tags",        Name = "Tags",    FillWeight = 10, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Samples",     Name = "Samples", FillWeight = 14, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Status",      Name = "Status",  FillWeight = 18 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Run time",   Name = "Run",     FillWeight = 19 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Duration",    Name = "Dur",     FillWeight = 10, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Mode",        Name = "Mode",    FillWeight = 10 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Direction",   Name = "Dir2",    FillWeight = 23 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Tags",        Name = "Tags",    FillWeight = 9,  DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Samples",     Name = "Samples", FillWeight = 12, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Status",      Name = "Status",  FillWeight = 17 });
 
             foreach (var e in _entries)
             {
+                // Older journal files predate CompletedLocal — show "—" for those runs.
+                string duration = e.CompletedLocal.HasValue && e.CompletedLocal.Value >= e.RunLocal
+                    ? SyncReportDialog.FormatDuration(e.CompletedLocal.Value - e.RunLocal)
+                    : "—";
                 int idx = _grid.Rows.Add(
                     e.RunLocal.ToString("yyyy-MM-dd HH:mm:ss"),
+                    duration,
                     e.Mode,
                     $"{e.SourceLabel} → {e.TargetLabel}",
                     e.TagCount.ToString("N0"),
@@ -194,6 +201,19 @@ namespace HistorianSyncTool.Forms
         {
             var sel = Selected;
             if (sel == null) return;
+
+            // Entries since Phase 10 carry the FULL report of their run (both directions
+            // for a bidirectional run) — reopen the exact results dialog the user saw,
+            // including batches, errors and Started/Finished/Duration.
+            if (sel.ReportDirections != null && sel.ReportDirections.Count > 0)
+            {
+                var reports = sel.ReportDirections.Select(d => d.ToReport()).ToList();
+                using (var dlg = new SyncReportDialog(reports, samplesOnly: false))
+                    dlg.ShowDialog(this);
+                return;
+            }
+
+            // Older entries: reconstruct what we can from the journaled samples.
             using (var dlg = new SyncReportDialog(
                 new List<SyncRunReport> { BuildReportFromEntry(sel) }, samplesOnly: true))
                 dlg.ShowDialog(this);
@@ -209,7 +229,7 @@ namespace HistorianSyncTool.Forms
             var r = new SyncRunReport
             {
                 StartedAt      = e.RunLocal,
-                CompletedAt    = e.RunLocal,
+                CompletedAt    = e.CompletedLocal ?? e.RunLocal, // old entries: no end time
                 SourceServer   = e.SourceLabel,
                 TargetServer   = e.TargetLabel,
                 DirectionLabel = $"{First1(e.SourceLabel)}→{First1(e.TargetLabel)}"

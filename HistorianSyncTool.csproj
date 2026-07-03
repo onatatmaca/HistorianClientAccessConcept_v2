@@ -47,6 +47,7 @@
     <Reference Include="System.Configuration" />
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.IdentityModel" />
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.ServiceModel" />
     <Reference Include="System.Windows.Forms" />
@@ -63,6 +64,7 @@
     </Compile>
     <Compile Include="Forms\BackfillHistoryDialog.cs" />
     <Compile Include="Forms\BidirectionalBackfillDialog.cs" />
+    <Compile Include="Forms\ProgressDialog.cs" />
     <Compile Include="Forms\SchedulerSettingsDialog.cs" />
     <Compile Include="Forms\SyncReportDialog.cs" />
     <Compile Include="Forms\TagSelectionDialog.cs" />
@@ -72,6 +74,7 @@
     <Compile Include="Models\GapWindow.cs" />
     <Compile Include="Models\ServerStats.cs" />
     <Compile Include="Models\SyncRunReport.cs" />
+    <Compile Include="Models\TimelineData.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Properties\Settings.Designer.cs">
@@ -83,16 +86,21 @@
     <Compile Include="Services\GapAnalysisService.cs" />
     <Compile Include="Services\HistorianConnectionService.cs" />
     <Compile Include="Services\HistorianDataService.cs" />
+    <Compile Include="Services\HostInputParser.cs" />
+    <Compile Include="Services\IntervalBuilder.cs" />
+    <Compile Include="Services\ProficyEndpoint.cs" />
     <Compile Include="Services\RetryHelper.cs" />
     <Compile Include="Services\SampleBucketer.cs" />
     <Compile Include="Services\SampleFilter.cs" />
     <Compile Include="Services\ScheduleLogger.cs" />
     <Compile Include="Services\ScheduleService.cs" />
+    <Compile Include="Services\SyncPlanner.cs" />
     <Compile Include="UI\AppTheme.cs" />
     <Compile Include="UI\Controls\CollapsiblePanel.cs" />
     <Compile Include="UI\Controls\ConnectionDot.cs" />
     <Compile Include="UI\Controls\CoverageBar.cs" />
     <Compile Include="UI\Controls\FlatButton.cs" />
+    <Compile Include="UI\Controls\GapTimeline.cs" />
     <Compile Include="UI\Controls\SectionHeader.cs" />
   </ItemGroup>
 

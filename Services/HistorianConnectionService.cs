@@ -1,11 +1,30 @@
 using Proficy.Historian.ClientAccess.API;
 using System;
+using System.Configuration;
 using System.Diagnostics;
 
 namespace HistorianSyncTool.Services
 {
     public class HistorianConnectionService : IDisposable
     {
+        /// <summary>
+        /// Connection properties shared by both servers. An optional login can be set in
+        /// app.config (HistorianUsername/HistorianPassword) for remote servers that reject
+        /// empty usernames; left empty, the Windows session is used (the normal case when
+        /// the tool runs on the Historian box itself).
+        /// </summary>
+        private static ConnectionProperties BuildProperties(string hostname)
+        {
+            var props = new ConnectionProperties { ServerHostName = hostname };
+            string user = ConfigurationManager.AppSettings["HistorianUsername"];
+            if (!string.IsNullOrEmpty(user))
+            {
+                props.Username = user;
+                props.Password = ConfigurationManager.AppSettings["HistorianPassword"] ?? "";
+            }
+            props.ServerCertificateValidationMode = CertificateValidationMode.None;
+            return props;
+        }
         private ServerConnection _primary;
         private ServerConnection _secondary;
         private bool _disposed;
@@ -19,24 +38,44 @@ namespace HistorianSyncTool.Services
         public string PrimaryHostname { get; private set; }
         public string SecondaryHostname { get; private set; }
 
-        public void ConnectPrimary(string hostname)
+        public void ConnectPrimary(string hostInput)
         {
-            if (string.IsNullOrWhiteSpace(hostname))
-                throw new ArgumentException("Hostname cannot be empty.", nameof(hostname));
+            if (string.IsNullOrWhiteSpace(hostInput))
+                throw new ArgumentException("Hostname cannot be empty.", nameof(hostInput));
             DisconnectPrimary();
-            _primary = new ServerConnection(new ConnectionProperties { ServerHostName = hostname });
-            _primary.Connect();
-            PrimaryHostname = hostname;
+            _primary = Open(hostInput);
+            PrimaryHostname = hostInput.Trim();
         }
 
-        public void ConnectSecondary(string hostname)
+        public void ConnectSecondary(string hostInput)
         {
-            if (string.IsNullOrWhiteSpace(hostname))
-                throw new ArgumentException("Hostname cannot be empty.", nameof(hostname));
+            if (string.IsNullOrWhiteSpace(hostInput))
+                throw new ArgumentException("Hostname cannot be empty.", nameof(hostInput));
             DisconnectSecondary();
-            _secondary = new ServerConnection(new ConnectionProperties { ServerHostName = hostname });
-            _secondary.Connect();
-            SecondaryHostname = hostname;
+            _secondary = Open(hostInput);
+            SecondaryHostname = hostInput.Trim();
+        }
+
+        /// <summary>
+        /// Opens one connection from free-text input: "host", "host:port", "ip" or
+        /// "ip:port". The port applies to this connect only (connections are opened
+        /// sequentially); IP inputs go through ProficyEndpoint.PrepareForIp, which
+        /// relaxes ONLY the WCF DNS-identity comparison — hostname connects keep the
+        /// full vendor-stock security path.
+        /// </summary>
+        private static ServerConnection Open(string hostInput)
+        {
+            var (host, port) = HostInputParser.Parse(hostInput);
+            if (host.Length == 0)
+                throw new ArgumentException("Hostname cannot be empty.", nameof(hostInput));
+
+            ProficyEndpoint.SetPortForNextConnect(port);
+            var props = BuildProperties(host);
+            var conn = new ServerConnection(props);
+            if (HostInputParser.IsIpAddress(host))
+                ProficyEndpoint.PrepareForIp(conn, props);
+            conn.Connect();
+            return conn;
         }
 
         public void DisconnectPrimary()

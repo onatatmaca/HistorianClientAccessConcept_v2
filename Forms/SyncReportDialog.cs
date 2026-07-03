@@ -49,7 +49,11 @@ namespace HistorianSyncTool.Forms
             int totalSamples   = _reports.Sum(r => r.SamplesWritten);
             int gapsFound      = _reports.Sum(r => r.GapsFound);
             int tagCount       = _reports.Sum(r => r.TagResults.Count);
-            double durationSec = _reports.Sum(r => r.Duration.TotalSeconds);
+            // Wall-clock timing across all reports (directions run sequentially, so
+            // min-start → max-completed is the honest "how long did this take").
+            DateTime started   = _reports.Min(r => r.StartedAt);
+            DateTime completed = _reports.Max(r => r.CompletedAt);
+            TimeSpan wallClock = completed > started ? completed - started : TimeSpan.Zero;
 
             Text            = _multi ? "Sync Report — both directions" : "Sync Report";
             Size            = new Size(940, 560);
@@ -66,16 +70,28 @@ namespace HistorianSyncTool.Forms
                 ? string.Join("   +   ", _reports.Select(r => $"{r.SourceServer}→{r.TargetServer}"))
                 : $"{_reports[0].SourceServer ?? "?"} → {_reports[0].TargetServer ?? "?"}";
 
-            string titleExtra = _samplesOnly
-                ? $"   ·   {_reports.Min(r => r.StartedAt):yyyy-MM-dd HH:mm:ss}"
-                : $"   ·   Duration {durationSec:F1}s" +
-                  (totalAttempted > 0 ? $"   ·   {totalSucceeded}/{totalAttempted} batches succeeded" : "");
+            string titleExtra = !_samplesOnly && totalAttempted > 0
+                ? $"   ·   {totalSucceeded}/{totalAttempted} batches succeeded"
+                : "";
             var lblTitle = new Label
             {
                 Text = $"{route}{titleExtra}",
                 Dock = DockStyle.Top, Height = 34,
                 Padding = new Padding(16, 10, 16, 2),
                 Font = AppTheme.AppTitle, ForeColor = AppTheme.Navy
+            };
+
+            // Explicit run timing — always visible, mirrored in Backfill History.
+            var lblTiming = new Label
+            {
+                Text = wallClock > TimeSpan.Zero
+                    ? $"Started: {started:yyyy-MM-dd HH:mm:ss}   ·   " +
+                      $"Finished: {completed:yyyy-MM-dd HH:mm:ss}   ·   " +
+                      $"Duration: {FormatDuration(wallClock)}"
+                    : $"Run: {started:yyyy-MM-dd HH:mm:ss}",
+                Dock = DockStyle.Top, Height = 20,
+                Padding = new Padding(16, 0, 16, 2),
+                Font = AppTheme.Default, ForeColor = AppTheme.TextSecondary
             };
 
             var lblTotals = new Label
@@ -199,6 +215,7 @@ namespace HistorianSyncTool.Forms
 
             Controls.Add(_grid);         // Fill
             Controls.Add(lblTotals);     // Top
+            Controls.Add(lblTiming);     // Top (between title and totals)
             Controls.Add(lblTitle);      // Top
             Controls.Add(pnlButtons);    // Bottom
 
@@ -223,7 +240,7 @@ namespace HistorianSyncTool.Forms
                         sw.WriteLine($"Route;{route}");
                         sw.WriteLine($"Started;{_reports.Min(r => r.StartedAt):yyyy-MM-dd HH:mm:ss}");
                         sw.WriteLine($"Completed;{_reports.Max(r => r.CompletedAt):yyyy-MM-dd HH:mm:ss}");
-                        sw.WriteLine($"Duration (s);{_reports.Sum(r => r.Duration.TotalSeconds):F1}");
+                        sw.WriteLine($"Duration (s);{(_reports.Max(r => r.CompletedAt) - _reports.Min(r => r.StartedAt)).TotalSeconds:F1}");
                         sw.WriteLine($"Gaps found;{_reports.Sum(r => r.GapsFound)}");
                         sw.WriteLine($"Batches attempted;{_reports.Sum(r => r.BatchesAttempted)}");
                         sw.WriteLine($"Batches succeeded;{_reports.Sum(r => r.BatchesSucceeded)}");
@@ -271,7 +288,7 @@ namespace HistorianSyncTool.Forms
                         sw.WriteLine($"  {route}");
                         sw.WriteLine($"  Started:   {_reports.Min(r => r.StartedAt):yyyy-MM-dd HH:mm:ss}");
                         sw.WriteLine($"  Completed: {_reports.Max(r => r.CompletedAt):yyyy-MM-dd HH:mm:ss}");
-                        sw.WriteLine($"  Duration:  {_reports.Sum(r => r.Duration.TotalSeconds):F1}s");
+                        sw.WriteLine($"  Duration:  {FormatDuration(_reports.Max(r => r.CompletedAt) - _reports.Min(r => r.StartedAt))}");
                         sw.WriteLine($"  Gaps:      {_reports.Sum(r => r.GapsFound)}");
                         sw.WriteLine($"  Batches:   {_reports.Sum(r => r.BatchesSucceeded)}/{_reports.Sum(r => r.BatchesAttempted)} succeeded" +
                                      (_reports.Sum(r => r.BatchesFailed) > 0 ? $", {_reports.Sum(r => r.BatchesFailed)} failed" : ""));
@@ -316,5 +333,14 @@ namespace HistorianSyncTool.Forms
 
         private static string Truncate(string s, int len) =>
             string.IsNullOrEmpty(s) ? "" : (s.Length <= len ? s : s.Substring(0, len - 1) + "…");
+
+        /// <summary>Human duration: "2m 31s", "1h 04m 09s", "8.3s".</summary>
+        internal static string FormatDuration(TimeSpan ts)
+        {
+            if (ts < TimeSpan.Zero) ts = TimeSpan.Zero;
+            if (ts.TotalHours >= 1)   return $"{(int)ts.TotalHours}h {ts.Minutes:00}m {ts.Seconds:00}s";
+            if (ts.TotalMinutes >= 1) return $"{(int)ts.TotalMinutes}m {ts.Seconds:00}s";
+            return $"{ts.TotalSeconds:F1}s";
+        }
     }
 }

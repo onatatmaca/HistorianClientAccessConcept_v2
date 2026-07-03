@@ -49,12 +49,43 @@ namespace HistorianSyncTool.Forms
         // ── Auto-read suppression (prevents reads during DataSource assignment) ──
         private bool _suppressAutoRead;
 
-        // ── Auto-analyze debounce: re-runs gap analysis ~500ms after date changes ──
+        // ── Auto-analyze debounce: re-runs gap analysis ~500ms after a TAG change.
+        //    Date/time edits & the quick presets do NOT auto-run — a new time range is
+        //    analyzed only when the user clicks "Analyze Gaps" (or click-to-zoom). ──
         private System.Windows.Forms.Timer _gapAutoAnalyzeTimer;
-        private bool  _suppressAutoAnalyze;
 
         // ── Unattended scheduler (Phase 7) ─────────────────────────────────────────
         private ScheduleService _schedule;
+
+        // ── Modal progress dialog (Phase 9) ────────────────────────────────────────
+        // One Cancel button, one progress surface, and the main window is blocked
+        // while an operation runs. The dialog only appears if the operation outlives
+        // a short delay, so quick actions don't flash a window.
+        private ProgressDialog _progressDlg;
+        private System.Windows.Forms.Timer _progressShowTimer;
+        private string _pendingOpTitle = "Working…";
+        private bool _suppressOpDialog;   // true during scheduled/headless runs
+
+        // ── Tag link: primary tag ↔ secondary tag (Phase 9) ────────────────────────
+        private bool _tagLinkEnabled = true;
+        private bool _isLinkPropagating;
+
+        // ── Timeline zoom history (Phase 9) ────────────────────────────────────────
+        private readonly Stack<(DateTime From, DateTime To)> _zoomStack =
+            new Stack<(DateTime From, DateTime To)>();
+
+        // ── Live edge: exclude the trailing N seconds from every backfill diff.
+        // On live servers the collectors are still writing there, so evaluating up to
+        // "now" reports in-flight samples as missing on every run — an endless backfill.
+        private static readonly TimeSpan LiveEdgeGrace = ReadLiveEdgeGrace();
+
+        private static TimeSpan ReadLiveEdgeGrace()
+        {
+            int seconds;
+            string cfg = ConfigurationManager.AppSettings["LiveEdgeGraceSeconds"];
+            return TimeSpan.FromSeconds(
+                int.TryParse(cfg, out seconds) && seconds >= 0 ? seconds : 120);
+        }
 
         // ── Last-browsed tag names per server (for the scheduler's tag multiselect) ──
         private string[] _browsedPrimaryTags   = new string[0];
@@ -98,14 +129,28 @@ namespace HistorianSyncTool.Forms
                 btnConnect, btnBrowseTags, btnGetStats,
                 btnReadPrimary, btnReadSecondary, btnCompare,
                 btnCopyToPrimary, btnCopyToSecondary,
-                btnAnalyzeGaps, btnBackfillPreview, btnHistory
+                btnAnalyzeGaps, btnBackfillPreview, btnHistory,
+                btnTagLink
             };
 
-            // Debounced auto-analyze on date change
+            // Debounced auto-analyze after a TAG change only. Date/time edits and the
+            // quick-select presets deliberately do NOT auto-run — analysis for a new
+            // time range runs only when the user clicks "Analyze Gaps" (boss request
+            // 2026-07: editing day/month/hour used to fire a run on every field change).
             _gapAutoAnalyzeTimer = new System.Windows.Forms.Timer { Interval = 500 };
             _gapAutoAnalyzeTimer.Tick += GapAutoAnalyzeTimer_Tick;
-            dtpStart.ValueChanged += GapInputChanged;
-            dtpEnd.ValueChanged   += GapInputChanged;
+
+            // Modal progress dialog: appears only when an operation runs longer than this
+            _progressShowTimer = new System.Windows.Forms.Timer { Interval = 400 };
+            _progressShowTimer.Tick += ProgressShowTimer_Tick;
+
+            // Timeline interactivity: click a gap → zoom the date range to it
+            timeline.ZoomRequested += async (zoomFrom, zoomTo) => await ZoomTo(zoomFrom, zoomTo);
+            gridGaps.CellClick += gridGaps_CellClick;
+
+            // Tag link (same tag on both servers) — persisted preference
+            _tagLinkEnabled = Settings.Default.TagLinkEnabled;
+            UpdateTagLinkVisual();
 
             // Unattended scheduler — applies persisted settings, wires status indicator
             _schedule = new ScheduleService(RunScheduledBackfillAsync);
@@ -129,14 +174,6 @@ namespace HistorianSyncTool.Forms
             catch (Exception ex) { ScheduleLogger.Append($"Startup-run failed: {ex.Message}"); }
         }
 
-        private void GapInputChanged(object sender, EventArgs e)
-        {
-            if (_suppressAutoAnalyze || _isBusy) return;
-            if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected) return;
-            _gapAutoAnalyzeTimer.Stop();
-            _gapAutoAnalyzeTimer.Start();
-        }
-
         private async void GapAutoAnalyzeTimer_Tick(object sender, EventArgs e)
         {
             _gapAutoAnalyzeTimer.Stop();
@@ -152,7 +189,8 @@ namespace HistorianSyncTool.Forms
         {
             AppTheme.StyleGrid(gridPrimary);
             AppTheme.StyleGrid(gridSecondary);
-            AppTheme.StyleGrid(gridGaps);
+            // gridGaps is fully styled in SetupGapGrid — StyleGrid here would reset
+            // its taller wrapped header (ColumnHeadersHeight) back to the default.
         }
 
         private void SetupVirtualMode()
@@ -294,22 +332,15 @@ namespace HistorianSyncTool.Forms
         // ── Settings ───────────────────────────────────────────────────────────────
         private void LoadSettings()
         {
-            _suppressAutoAnalyze = true;
-            try
-            {
-                var s = Settings.Default;
-                txtPrimary.Text   = s.PrimaryHostname;
-                txtSecondary.Text = s.SecondaryHostname;
-                txtTagnameFilter.Text = s.TagnameFilter;
+            var s = Settings.Default;
+            txtPrimary.Text   = s.PrimaryHostname;
+            txtSecondary.Text = s.SecondaryHostname;
+            txtTagnameFilter.Text = s.TagnameFilter;
 
-                dtpStart.Value = s.StartDate > DateTime.MinValue
-                    ? s.StartDate : DateTime.Now.AddMonths(-1);
-                dtpEnd.Value = s.EndDate > DateTime.MinValue && s.EndDate > s.StartDate
-                    ? s.EndDate : DateTime.Now;
-
-                // Gap analysis always uses HistSync — no radio buttons
-            }
-            finally { _suppressAutoAnalyze = false; }
+            dtpStart.Value = s.StartDate > DateTime.MinValue
+                ? s.StartDate : DateTime.Now.AddMonths(-1);
+            dtpEnd.Value = s.EndDate > DateTime.MinValue && s.EndDate > s.StartDate
+                ? s.EndDate : DateTime.Now;
         }
 
         private void SaveSettings()
@@ -320,6 +351,7 @@ namespace HistorianSyncTool.Forms
             s.TagnameFilter        = txtTagnameFilter.Text.Trim();
             s.StartDate            = dtpStart.Value;
             s.EndDate              = dtpEnd.Value;
+            s.TagLinkEnabled       = _tagLinkEnabled;
             s.Save();
         }
 
@@ -329,6 +361,8 @@ namespace HistorianSyncTool.Forms
             try { _cts?.Cancel(); } catch { }
             try { _cts?.Dispose(); } catch { }
             try { _gapAutoAnalyzeTimer?.Stop(); _gapAutoAnalyzeTimer?.Dispose(); } catch { }
+            try { _progressShowTimer?.Stop(); _progressShowTimer?.Dispose(); } catch { }
+            try { _progressDlg?.RequestClose(); } catch { }
             try { _schedule?.Dispose(); } catch { }
             _connections.Dispose();
             base.OnFormClosing(e);
@@ -362,6 +396,7 @@ namespace HistorianSyncTool.Forms
             if (InvokeRequired) { Invoke((Action)(() => SetStatus(message, isError))); return; }
             lblStatus.Text      = message;
             lblStatus.ForeColor = isError ? AppTheme.Danger : AppTheme.TextPrimary;
+            _progressDlg?.UpdateDetail(message);
             Log(message);
         }
 
@@ -369,23 +404,57 @@ namespace HistorianSyncTool.Forms
         {
             if (InvokeRequired) { Invoke((Action)(() => SetBusy(busy, operationLabel))); return; }
             _isBusy = busy;
-            progressOp.Visible  = busy;
-            btnCancel.Visible   = busy;
-            btnStop.Visible     = busy;
-            progressOp.Style    = busy ? ProgressBarStyle.Marquee : ProgressBarStyle.Blocks;
-            if (!busy) { progressOp.Style = ProgressBarStyle.Blocks; progressOp.Value = 0; }
 
             foreach (var btn in _actionButtons)
                 btn.Enabled = !busy;
+
+            if (busy)
+            {
+                _pendingOpTitle = string.IsNullOrWhiteSpace(operationLabel) ? "Working…" : operationLabel;
+                if (!_suppressOpDialog)
+                {
+                    _progressShowTimer.Stop();
+                    _progressShowTimer.Start();   // dialog appears only if the op outlives the delay
+                }
+            }
+            else
+            {
+                _progressShowTimer.Stop();
+                _progressDlg?.RequestClose();     // unwinds the nested ShowDialog pump
+            }
+        }
+
+        /// <summary>
+        /// Delayed-show tick: the operation is still running after the grace period, so
+        /// bring up the modal progress dialog. ShowDialog pumps messages, which keeps the
+        /// running operation's async continuations and worker Invokes flowing; SetBusy(false)
+        /// closes the dialog and control returns here.
+        /// </summary>
+        private void ProgressShowTimer_Tick(object sender, EventArgs e)
+        {
+            _progressShowTimer.Stop();
+            if (!_isBusy || _suppressOpDialog || _progressDlg != null) return;
+
+            using (var dlg = new ProgressDialog(_pendingOpTitle))
+            {
+                _progressDlg = dlg;
+                dlg.CancelRequested += (s2, e2) => { try { _cts?.Cancel(); } catch { } };
+                try { dlg.ShowDialog(this); }
+                finally { _progressDlg = null; }
+            }
         }
 
         private void SetProgress(int current, int total)
         {
             if (InvokeRequired) { Invoke((Action)(() => SetProgress(current, total))); return; }
             if (total <= 0) return;
-            progressOp.Style = ProgressBarStyle.Blocks;
-            progressOp.Maximum = total;
-            progressOp.Value = Math.Min(current, total);
+            _progressDlg?.UpdateStep(current, total, $"Batch {current} / {total}");
+        }
+
+        private void SetPhaseProgress(int current, int total, string label)
+        {
+            if (InvokeRequired) { Invoke((Action)(() => SetPhaseProgress(current, total, label))); return; }
+            _progressDlg?.UpdatePhase(current, total, label);
         }
 
         private void Log(string message)
@@ -435,13 +504,6 @@ namespace HistorianSyncTool.Forms
             lblSecondaryStatus.ForeColor = AppTheme.Danger;
             txtSecondary.BackColor     = SystemColors.Window;
             dotStatus.State = ConnectionState.Error;
-        }
-
-        private void CancelCurrentOperation()
-        {
-            _cts?.Cancel();
-            SetBusy(false);
-            SetStatus("Operation cancelled.");
         }
 
         /// <summary>
@@ -771,8 +833,21 @@ namespace HistorianSyncTool.Forms
             if (_suppressAutoRead || _isBusy) return;
             if (!_connections.IsPrimaryConnected) return;
             if (string.IsNullOrWhiteSpace(cboPrimary.Text)) return;
+
+            // Linked mode: auto-select the identical tag on the secondary side too
+            bool mirrored = _tagLinkEnabled && !_isLinkPropagating
+                && TryMirrorTagSelection(cboPrimary, cboSecondary);
+
             lblGridPrimaryTag.Text = $"{txtPrimary.Text.Trim()} — {cboPrimary.Text}";
             await ReadPrimaryData();
+
+            if (mirrored && _connections.IsSecondaryConnected
+                && !string.IsNullOrWhiteSpace(cboSecondary.Text))
+            {
+                lblGridSecondaryTag.Text = $"{txtSecondary.Text.Trim()} — {cboSecondary.Text}";
+                await ReadSecondaryData();
+            }
+
             // Tag change → re-analyze gaps (per-tag coverage) after a short debounce
             _gapAutoAnalyzeTimer?.Stop();
             _gapAutoAnalyzeTimer?.Start();
@@ -821,10 +896,91 @@ namespace HistorianSyncTool.Forms
             if (_suppressAutoRead || _isBusy) return;
             if (!_connections.IsSecondaryConnected) return;
             if (string.IsNullOrWhiteSpace(cboSecondary.Text)) return;
+
+            bool mirrored = _tagLinkEnabled && !_isLinkPropagating
+                && TryMirrorTagSelection(cboSecondary, cboPrimary);
+
             lblGridSecondaryTag.Text = $"{txtSecondary.Text.Trim()} — {cboSecondary.Text}";
+            await ReadSecondaryData();
+
+            if (mirrored && _connections.IsPrimaryConnected
+                && !string.IsNullOrWhiteSpace(cboPrimary.Text))
+            {
+                lblGridPrimaryTag.Text = $"{txtPrimary.Text.Trim()} — {cboPrimary.Text}";
+                await ReadPrimaryData();
+            }
+
+            _gapAutoAnalyzeTimer?.Stop();
+            _gapAutoAnalyzeTimer?.Start();
+        }
+
+        /// <summary>
+        /// When tag-link is on, mirrors the tag just picked on one side to the other
+        /// side's combo (if that tag exists there). The change is made with events
+        /// suppressed — the caller decides what to read afterwards, so the flow stays
+        /// one predictable sequence. Returns true when the other combo changed.
+        /// </summary>
+        private bool TryMirrorTagSelection(ComboBox changed, ComboBox other)
+        {
+            string name = changed.Text;
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            if (string.Equals(other.Text, name, StringComparison.OrdinalIgnoreCase)) return false;
+
+            int match = -1;
+            for (int i = 0; i < other.Items.Count; i++)
+            {
+                var t = other.Items[i] as Tag;
+                string itemName = t != null ? t.Name : other.Items[i]?.ToString();
+                if (string.Equals(itemName, name, StringComparison.OrdinalIgnoreCase))
+                { match = i; break; }
+            }
+            if (match < 0)
+            {
+                if (other.Items.Count > 0)
+                    SetStatus($"'{name}' does not exist on the other server — tags not linked for this selection.");
+                return false;
+            }
+
+            _isLinkPropagating = true;
+            _suppressAutoRead = true;
+            try { other.SelectedIndex = match; }
+            finally { _suppressAutoRead = false; _isLinkPropagating = false; }
+            return true;
+        }
+
+        private void btnTagLink_Click(object sender, EventArgs e)
+        {
+            if (_isBusy) return;
+            _tagLinkEnabled = !_tagLinkEnabled;
+            Settings.Default.TagLinkEnabled = _tagLinkEnabled;
+            Settings.Default.Save();
+            UpdateTagLinkVisual();
+
+            // Turning the link ON re-aligns the secondary tag immediately so the UI
+            // state matches what the button promises.
+            if (_tagLinkEnabled && !string.IsNullOrWhiteSpace(cboPrimary.Text)
+                && TryMirrorTagSelection(cboPrimary, cboSecondary)
+                && _connections.IsSecondaryConnected)
+            {
+                lblGridSecondaryTag.Text = $"{txtSecondary.Text.Trim()} — {cboSecondary.Text}";
+                var _ = ReadSecondaryThenReanalyze();
+            }
+        }
+
+        private async Task ReadSecondaryThenReanalyze()
+        {
             await ReadSecondaryData();
             _gapAutoAnalyzeTimer?.Stop();
             _gapAutoAnalyzeTimer?.Start();
+        }
+
+        private void UpdateTagLinkVisual()
+        {
+            btnTagLink.Text = _tagLinkEnabled
+                ? "⇄  Linked — same tag on both servers"
+                : "✕  Not linked — tags chosen independently";
+            btnTagLink.BackColor = _tagLinkEnabled ? AppTheme.NavyLight : AppTheme.Background;
+            btnTagLink.ForeColor = _tagLinkEnabled ? AppTheme.Navy : AppTheme.TextSecondary;
         }
 
         private async Task ReadSecondaryData()
@@ -946,7 +1102,8 @@ namespace HistorianSyncTool.Forms
 
         /// <summary>Shows tag selection dialog and returns chosen tags, or null if cancelled.</summary>
         private List<string> ShowTagSelectionDialog(
-            GapAnalysisResult gapResult, string sourceLabel, string targetLabel)
+            GapAnalysisResult gapResult, string sourceLabel, string targetLabel,
+            DateTime evalFrom, DateTime evalTo)
         {
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
             {
@@ -975,7 +1132,7 @@ namespace HistorianSyncTool.Forms
             using (var dlg = new TagSelectionDialog(sourceLabel, targetLabel,
                 gapCount, batchCount, sharedTags,
                 sourceConn, targetConn, allBackfillBatches,
-                dtpStart.Value, dtpEnd.Value, _data))
+                evalFrom, evalTo, _data))
             {
                 if (dlg.ShowDialog(this) != System.Windows.Forms.DialogResult.OK)
                     return null;
@@ -1001,6 +1158,7 @@ namespace HistorianSyncTool.Forms
                     SetStatus("No tags found on both servers.", true);
                     return null;
                 }
+                SetStatus($"{shared.Count} tag(s) exist on both servers.");
                 return shared;
             }
             catch (Exception ex)
@@ -1012,24 +1170,43 @@ namespace HistorianSyncTool.Forms
 
         private async void btnCopyToSecondary_Click(object sender, EventArgs e)
         {
-            var tags = ShowTagSelectionDialog(_lastSecondaryResult, "Primary", "Secondary");
+            // Same live-edge clamp as the backfill itself, so the dialog's "Will copy"
+            // numbers match exactly what ExecuteBackfill will write.
+            DateTime from = dtpStart.Value;
+            DateTime to   = ClampLiveEdge(dtpEnd.Value);
+            if (from >= to) { SetStatus("Invalid evaluation range.", true); return; }
+
+            var tags = ShowTagSelectionDialog(_lastSecondaryResult, "Primary", "Secondary", from, to);
             if (tags == null) return;
 
             await ExecuteBackfill(_lastSecondaryResult, _connections.Primary,
-                _connections.Secondary, "Primary", "Secondary", tags);
+                _connections.Secondary, "Primary", "Secondary", tags,
+                evalFromOverride: from, evalToOverride: to);
 
             await AutoRefreshAfterBackfill();
         }
 
         private async void btnCopyToPrimary_Click(object sender, EventArgs e)
         {
-            var tags = ShowTagSelectionDialog(_lastPrimaryResult, "Secondary", "Primary");
+            DateTime from = dtpStart.Value;
+            DateTime to   = ClampLiveEdge(dtpEnd.Value);
+            if (from >= to) { SetStatus("Invalid evaluation range.", true); return; }
+
+            var tags = ShowTagSelectionDialog(_lastPrimaryResult, "Secondary", "Primary", from, to);
             if (tags == null) return;
 
             await ExecuteBackfill(_lastPrimaryResult, _connections.Secondary,
-                _connections.Primary, "Secondary", "Primary", tags);
+                _connections.Primary, "Secondary", "Primary", tags,
+                evalFromOverride: from, evalToOverride: to);
 
             await AutoRefreshAfterBackfill();
+        }
+
+        /// <summary>Caps an evaluation end at now − LiveEdgeGrace (see field comment).</summary>
+        private static DateTime ClampLiveEdge(DateTime evalTo)
+        {
+            DateTime limit = DateTime.Now - LiveEdgeGrace;
+            return evalTo > limit ? limit : evalTo;
         }
 
         private async void btnBackfillPreview_Click(object sender, EventArgs e)
@@ -1037,7 +1214,8 @@ namespace HistorianSyncTool.Forms
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
             { SetStatus("Both servers must be connected for backfill.", true); return; }
 
-            DateTime from = dtpStart.Value, to = dtpEnd.Value;
+            DateTime from = dtpStart.Value;
+            DateTime to   = ClampLiveEdge(dtpEnd.Value);
             if (from >= to) { SetStatus("Invalid evaluation range.", true); return; }
 
             var sharedTags = TryGetSharedTags();
@@ -1069,6 +1247,27 @@ namespace HistorianSyncTool.Forms
                     "Secondary", "Primary", s2p, evalFromOverride: from, evalToOverride: to,
                     showReport: false);
                 if (r != null) reports.Add(r);
+            }
+
+            // Persist the COMBINED report on every journal entry of this run, so clicking
+            // either entry in Backfill History reopens the exact same both-directions
+            // dialog later (each entry initially stored only its own direction).
+            if (reports.Count > 1)
+            {
+                try
+                {
+                    var combined = reports.Select(JournalDirectionReport.From).ToList();
+                    var all = BackfillJournalService.LoadAll();
+                    foreach (var rep in reports)
+                    {
+                        if (rep.JournalId == null) continue;
+                        var entry = all.FirstOrDefault(en => en.Id == rep.JournalId);
+                        if (entry == null) continue;
+                        entry.ReportDirections = combined;
+                        BackfillJournalService.Save(entry);
+                    }
+                }
+                catch (Exception ex) { Log($"Combined-report journal update failed: {ex.Message}"); }
             }
 
             // Single combined report covering both directions.
@@ -1107,6 +1306,17 @@ namespace HistorianSyncTool.Forms
             // Unattended runs pass explicit overrides — they aren't driven by the date pickers.
             DateTime evalFrom = evalFromOverride ?? dtpStart.Value;
             DateTime evalTo   = evalToOverride   ?? dtpEnd.Value;
+
+            // Live-edge guard: never diff/copy the trailing grace window. On live servers
+            // the collectors are still writing there, so samples merely in flight would be
+            // reported "missing" — and every run would find something new to copy, forever.
+            DateTime liveLimit = DateTime.Now - LiveEdgeGrace;
+            if (evalTo > liveLimit)
+            {
+                evalTo = liveLimit;
+                Log($"Evaluation end moved to {evalTo:yyyy-MM-dd HH:mm:ss} — the last " +
+                    $"{LiveEdgeGrace.TotalSeconds:F0}s are excluded (collectors may still be writing).");
+            }
             if (evalFrom >= evalTo) { SetStatus("Invalid evaluation range.", true); return null; }
 
             TimeSpan batchSize = _gapAnalysis.BatchSize;
@@ -1134,6 +1344,7 @@ namespace HistorianSyncTool.Forms
                 GapsFound    = gapResult?.Gaps.Count ?? 0
             };
 
+            bool wasCancelled = false;
             try
             {
                 ResetCts();
@@ -1152,6 +1363,7 @@ namespace HistorianSyncTool.Forms
                         {
                             Log($"── Tag {tagIdx + 1}/{totalTags}: {tag} — comparing servers ──");
                             SetStatus($"Tag {tagIdx + 1}/{totalTags}: {tag} — comparing…");
+                            SetPhaseProgress(tagIdx + 1, totalTags, $"Tag {tagIdx + 1} / {totalTags} — {tag}");
                         }));
 
                         // Read both servers for the full eval range
@@ -1170,20 +1382,31 @@ namespace HistorianSyncTool.Forms
                         }
                         token.ThrowIfCancellationRequested();
 
-                        // Direct-comparison diff at whole-second resolution (Historian's
-                        // storage precision). Comparing exact ticks would never match a
-                        // sub-second source sample to the second it gets stored as, so the
-                        // same samples would be "missing" and re-copied on every run.
-                        var tgtTicks = new HashSet<long>(tgtData.Select(s => SampleFilter.ToSecondTicks(s.Time)));
+                        // Plan what to copy (Phase 10) — SyncPlanner decides per tag:
+                        // aligned streams (same-source data) → exact whole-second diff,
+                        // which catches isolated missing samples; independently collected
+                        // streams (redundant collectors on their own clocks) → only real
+                        // target OUTAGES are filled. The old always-exact diff reported
+                        // thousands of phantom "missing" samples on real plant data (same
+                        // values logged seconds apart) and would have permanently
+                        // interleaved both collectors' streams into the archive.
+                        var plan = SyncPlanner.Plan(
+                            srcData.Select(s => s.Time).ToList(),
+                            tgtData.Select(s => s.Time).ToList(),
+                            evalFrom, evalTo,
+                            _gapAnalysis.MinGapDuration, _gapAnalysis.ThresholdMultiplier);
+                        var copySet = new HashSet<DateTime>(plan.ToCopy);
                         var missing = srcData
-                            .Where(s => !tgtTicks.Contains(SampleFilter.ToSecondTicks(s.Time)))
+                            .Where(s => copySet.Contains(s.Time))
                             .OrderBy(s => s.Time)
                             .ToList();
 
                         if (missing.Count == 0)
                         {
                             Invoke((Action)(() =>
-                                Log($"  {tag}: already in sync ({srcData.Count} source, {tgtData.Count} target).")));
+                                Log($"  {tag}: in sync ({srcData.Count} source, {tgtData.Count} target samples" +
+                                    (plan.UsedExactDiff ? ")." :
+                                     $"; outage rule {FormatDuration(plan.OutageThreshold)} — no target outages)."))));
                             continue;
                         }
 
@@ -1193,8 +1416,11 @@ namespace HistorianSyncTool.Forms
                         var batches = SampleBucketer.GroupByBucket(missing, batchSize);
                         int totalBatches = batches.Count;
 
+                        string planMode = plan.UsedExactDiff
+                            ? "aligned streams — exact diff"
+                            : $"{plan.TargetOutages.Count} target outage(s), gap rule {FormatDuration(plan.OutageThreshold)}";
                         Invoke((Action)(() =>
-                            Log($"  {tag}: {missing.Count} missing sample(s) → {totalBatches} batch(es)")));
+                            Log($"  {tag}: {missing.Count} sample(s) to copy ({planMode}) → {totalBatches} batch(es)")));
 
                         int batchIdx = 0;
                         foreach (var batchSamples in batches)
@@ -1295,10 +1521,11 @@ namespace HistorianSyncTool.Forms
             }
             catch (OperationCanceledException)
             {
+                wasCancelled = true;
                 report.CompletedAt = DateTime.Now;
                 report.Errors.Add("Operation cancelled by user.");
                 LogRunReport(report);
-                SetStatus("Backfill cancelled — completed tags are preserved.");
+                SetStatus("Backfill cancelled.");
             }
             catch (Exception ex)
             {
@@ -1311,15 +1538,17 @@ namespace HistorianSyncTool.Forms
 
             // Journal whatever was actually written (even on cancel/partial failure) so
             // it can be reverted later. Saved regardless of attended/unattended mode.
+            BackfillJournalEntry journal = null;
             if (writtenTicks.Count > 0)
             {
                 try
                 {
-                    var journal = new BackfillJournalEntry
+                    journal = new BackfillJournalEntry
                     {
-                        Id          = BackfillJournalService.NewId(),
-                        RunLocal    = report.StartedAt,
-                        Mode        = unattended ? "Scheduled" : "Manual",
+                        Id             = BackfillJournalService.NewId(),
+                        RunLocal       = report.StartedAt,
+                        CompletedLocal = report.CompletedAt,
+                        Mode           = unattended ? "Scheduled" : "Manual",
                         SourceLabel = sourceLabel,
                         SourceHost  = sourceHost,
                         TargetLabel = targetLabel,
@@ -1327,9 +1556,36 @@ namespace HistorianSyncTool.Forms
                     };
                     foreach (var kv in writtenTicks)
                         journal.Tags.Add(new BackfillJournalTag { TagName = kv.Key, Ticks = kv.Value.ToArray() });
+                    // Full report snapshot → Backfill History can reopen the exact results
+                    // dialog later. Bidirectional runs overwrite this with the combined
+                    // both-directions list right after the second direction finishes.
+                    journal.ReportDirections = new List<JournalDirectionReport>
+                        { JournalDirectionReport.From(report) };
                     BackfillJournalService.Save(journal);
+                    report.JournalId = journal.Id;
                 }
-                catch (Exception ex) { Log($"Journal save error: {ex.Message}"); }
+                catch (Exception ex) { Log($"Journal save error: {ex.Message}"); journal = null; }
+            }
+
+            // Cancelled mid-run with data already copied → let the user decide right away
+            // whether to keep it or roll it back (the journal knows exactly what was written).
+            if (wasCancelled && !unattended && journal != null)
+            {
+                var keep = MessageBox.Show(this,
+                    $"The backfill was cancelled.\n\n" +
+                    $"{journal.TotalSamples:N0} sample(s) had already been copied to {targetLabel} " +
+                    $"({targetHost}) before the stop.\n\n" +
+                    "Keep the copied data?\n\n" +
+                    "Yes  –  keep it (you can still revert later via Backfill History)\n" +
+                    "No   –  revert now: delete exactly those samples again",
+                    "Keep the data copied so far?",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1);
+                if (keep == DialogResult.No)
+                {
+                    try { await RevertBackfill(journal); }
+                    catch (Exception ex) { Log($"Revert after cancel failed: {ex.Message}"); }
+                }
             }
 
             if (!unattended && showReport)
@@ -1542,6 +1798,15 @@ namespace HistorianSyncTool.Forms
         /// direction. Writes a one-line audit entry per direction via ScheduleLogger.
         /// </summary>
         private async Task RunScheduledBackfillAsync()
+        {
+            // Headless: a scheduled run (and its auto-refresh) must never pop the modal
+            // progress dialog in the user's face — the status bar + file log cover it.
+            _suppressOpDialog = true;
+            try { await RunScheduledBackfillCoreAsync(); }
+            finally { _suppressOpDialog = false; }
+        }
+
+        private async Task RunScheduledBackfillCoreAsync()
         {
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
             {
@@ -1762,6 +2027,15 @@ namespace HistorianSyncTool.Forms
                 List<DateTime> secOnSecondary = null;
                 List<DateTime> secOnPrimary   = null;
 
+                GapAnalysisResult priResult = null, secResult = null;
+                List<DiffSummaryRow> diffRows = null;
+                List<CopyableSegment> copyable = null;
+                string stripNote = null;
+                var priFill = new List<TimeRange>(); var priUnfill = new List<TimeRange>();
+                var secFill = new List<TimeRange>(); var secUnfill = new List<TimeRange>();
+                List<TimeRange> priBack = null, secBack = null;
+                bool priFeasKnown = false, secFeasKnown = false;
+
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
@@ -1786,41 +2060,93 @@ namespace HistorianSyncTool.Forms
                         if (hasPrimary)
                             secOnPrimary = SafeReadTimes(_connections.Primary, secTag, from, to);
                     }
+
+                    token.ThrowIfCancellationRequested();
+
+                    // Analysis + all timeline preparation stays on this worker thread —
+                    // with real plant archives these lists hold millions of timestamps.
+                    if (priOnPrimary != null)
+                    {
+                        priResult = _gapAnalysis.Analyze(priOnPrimary, priHost, from, to);
+                        priResult.TagName = priTag;
+                    }
+                    if (secOnSecondary != null)
+                    {
+                        secResult = _gapAnalysis.Analyze(secOnSecondary, secHost, from, to);
+                        secResult.TagName = secTag;
+                    }
+
+                    priFeasKnown = priOnSecondary != null;
+                    secFeasKnown = secOnPrimary   != null;
+                    if (priResult != null && priOnSecondary != null)
+                        _gapAnalysis.MarkBackfillFeasibility(priResult, priOnSecondary);
+                    if (secResult != null && secOnPrimary != null)
+                        _gapAnalysis.MarkBackfillFeasibility(secResult, secOnPrimary);
+
+                    // Cross-server sync plan for the selected tag(s) — the SAME SyncPlanner
+                    // the backfill uses, so the table, the amber strip and an actual
+                    // backfill all report identical numbers. Reuses the fetched samples.
+                    diffRows = new List<DiffSummaryRow>();
+                    TimeSpan floor = _gapAnalysis.MinGapDuration;
+                    double   mult  = _gapAnalysis.ThresholdMultiplier;
+                    SyncPlan planToSec = null, planToPri = null;
+                    if (priOnPrimary != null && priOnSecondary != null)
+                    {
+                        planToSec = SyncPlanner.Plan(priOnPrimary, priOnSecondary, from, to, floor, mult);
+                        planToPri = SyncPlanner.Plan(priOnSecondary, priOnPrimary, from, to, floor, mult);
+                        AddPlanRow(diffRows, priTag, true,  planToSec);
+                        AddPlanRow(diffRows, priTag, false, planToPri);
+                    }
+                    if (secTag != priTag && secOnPrimary != null && secOnSecondary != null)
+                    {
+                        AddPlanRow(diffRows, secTag, true,
+                            SyncPlanner.Plan(secOnPrimary, secOnSecondary, from, to, floor, mult));
+                        AddPlanRow(diffRows, secTag, false,
+                            SyncPlanner.Plan(secOnSecondary, secOnPrimary, from, to, floor, mult));
+                    }
+
+                    // Timeline tracks: split each gap window into red (the other server
+                    // HAS this data → copyable) and gray (missing on both → unfillable)
+                    // segments, using the per-batch feasibility marks.
+                    if (priResult != null)
+                        foreach (var gapW in priResult.Gaps)
+                            IntervalBuilder.SplitByFeasibility(gapW, priFill, priUnfill);
+                    if (secResult != null)
+                        foreach (var gapW in secResult.Gaps)
+                            IntervalBuilder.SplitByFeasibility(gapW, secFill, secUnfill);
+                    // Feasibility unknown (other side not read) → don't claim "missing on
+                    // both"; show plain missing (red) instead.
+                    if (!priFeasKnown) { priFill.AddRange(priUnfill); priUnfill.Clear(); }
+                    if (!secFeasKnown) { secFill.AddRange(secUnfill); secUnfill.Clear(); }
+
+                    // Copy-candidates strip (only meaningful when both sides show one tag):
+                    // exactly the samples the planner would copy — nothing phantom.
+                    copyable = new List<CopyableSegment>();
+                    if (priTag == secTag && planToSec != null)
+                    {
+                        copyable.AddRange(SegmentsFromPlan(planToSec, toSecondary: true));
+                        copyable.AddRange(SegmentsFromPlan(planToPri, toSecondary: false));
+                        if (!planToSec.UsedExactDiff || !planToPri.UsedExactDiff)
+                            stripNote = "outage-fill mode — collectors log independently " +
+                                        $"(timestamps match {planToSec.MatchRate:P0}); only real outages are copied";
+                    }
+                    else if (priTag != secTag)
+                        stripNote = "different tags selected — copy strip hidden (see table)";
+                    else
+                        stripNote = "connect both servers to see copy candidates";
+
+                    // Blue "backfilled by this tool" bands from the revert journal
+                    priBack = LoadBackfilledRanges(priHost, priTag, from, to);
+                    secBack = LoadBackfilledRanges(secHost, secTag, from, to);
                 }, token);
 
-                if (priOnPrimary != null)
-                {
-                    _lastPrimaryResult = _gapAnalysis.Analyze(priOnPrimary, priHost, from, to);
-                    _lastPrimaryResult.TagName = priTag;
-                }
-                if (secOnSecondary != null)
-                {
-                    _lastSecondaryResult = _gapAnalysis.Analyze(secOnSecondary, secHost, from, to);
-                    _lastSecondaryResult.TagName = secTag;
-                }
+                _lastPrimaryResult   = priResult;
+                _lastSecondaryResult = secResult;
+                _lastDiffRows        = diffRows ?? new List<DiffSummaryRow>();
 
-                if (_lastPrimaryResult != null && priOnSecondary != null)
-                    _gapAnalysis.MarkBackfillFeasibility(_lastPrimaryResult, priOnSecondary);
-                if (_lastSecondaryResult != null && secOnPrimary != null)
-                    _gapAnalysis.MarkBackfillFeasibility(_lastSecondaryResult, secOnPrimary);
-
-                // Cross-server diff for the selected tag(s) — reuses the samples already
-                // fetched above (no extra reads). Drives the right-panel diff table.
-                var diffRows = new List<DiffSummaryRow>();
-                var d1 = BuildDiffRow(priTag, "Primary → Secondary", true,  priOnPrimary,   priOnSecondary);
-                if (d1 != null) diffRows.Add(d1);
-                var d2 = BuildDiffRow(priTag, "Secondary → Primary", false, priOnSecondary, priOnPrimary);
-                if (d2 != null) diffRows.Add(d2);
-                if (secTag != priTag)
-                {
-                    var d3 = BuildDiffRow(secTag, "Primary → Secondary", true,  secOnPrimary,   secOnSecondary);
-                    if (d3 != null) diffRows.Add(d3);
-                    var d4 = BuildDiffRow(secTag, "Secondary → Primary", false, secOnSecondary, secOnPrimary);
-                    if (d4 != null) diffRows.Add(d4);
-                }
-                _lastDiffRows = diffRows;
-
-                UpdateGapAnalysisUI(from, to);
+                var priTrack = BuildTrack(priResult, "PRIMARY", priHost, priFeasKnown, priFill, priUnfill, priBack);
+                var secTrack = BuildTrack(secResult, "SECONDARY", secHost, secFeasKnown, secFill, secUnfill, secBack);
+                UpdateGapAnalysisUI(from, to, priTrack, secTrack, copyable, stripNote);
 
                 int totalGaps = (_lastPrimaryResult?.Gaps.Count ?? 0)
                               + (_lastSecondaryResult?.Gaps.Count ?? 0);
@@ -1838,9 +2164,11 @@ namespace HistorianSyncTool.Forms
         {
             try
             {
-                var samples = _data.ReadRaw(conn, tag, from);
+                // ReadRawInRange stops paging at `to` — the old ReadRaw(from) variant kept
+                // reading to the end of the archive, which crawled on real plant data
+                // whenever the evaluation window ended before the archive did.
+                var samples = _data.ReadRawInRange(conn, tag, from, to);
                 return samples
-                    .Where(s => s.Time >= from && s.Time <= to)
                     .Select(s => s.Time)
                     .OrderBy(t => t)
                     .ToList();
@@ -1863,15 +2191,12 @@ namespace HistorianSyncTool.Forms
             await RefreshLoadedGrids();
         }
 
-        private void UpdateGapAnalysisUI(DateTime from, DateTime to)
+        private void UpdateGapAnalysisUI(DateTime from, DateTime to,
+            TimelineTrackData priTrack, TimelineTrackData secTrack,
+            List<CopyableSegment> copyable, string stripNote)
         {
-            string priHost = txtPrimary.Text.Trim();
-            string secHost = txtSecondary.Text.Trim();
-
-            RenderCoverage(_lastPrimaryResult, barPrimary, lblPrimaryTagName,
-                "Primary", priHost, from, to);
-            RenderCoverage(_lastSecondaryResult, barSecondary, lblSecondaryTagName,
-                "Secondary", secHost, from, to);
+            timeline.SetData(from, to, priTrack, secTrack, copyable, stripNote);
+            lnkZoomOut.Visible = _zoomStack.Count > 0;
 
             PopulateDiffGrid();
 
@@ -1879,53 +2204,96 @@ namespace HistorianSyncTool.Forms
             int toPrimary   = _lastDiffRows.Where(r => !r.ToSecondary).Sum(r => r.Count);
             if (toSecondary == 0 && toPrimary == 0)
             {
-                lblGapSummary.Text      = "In sync — both servers hold the same\nsamples for the selected tag(s).";
+                lblGapSummary.Text      = "In sync — a backfill would copy\nnothing for the selected tag(s).";
                 lblGapSummary.ForeColor = AppTheme.Success;
             }
             else
             {
-                lblGapSummary.Text      = $"Primary → Secondary:  {toSecondary:N0} missing\n" +
-                                          $"Secondary → Primary:  {toPrimary:N0} missing";
+                lblGapSummary.Text      = $"Backfill would copy {toSecondary:N0} sample(s) → Secondary\n" +
+                                          $"and {toPrimary:N0} sample(s) → Primary";
                 lblGapSummary.ForeColor = AppTheme.Danger;
             }
         }
 
-        /// <summary>
-        /// Renders one server's coverage bar + label. Handles three cases:
-        /// (1) result has data → show bar with gaps, (2) analyzed but empty data → fully red 0%,
-        /// (3) not analyzed yet → neutral "not analyzed" label.
-        /// </summary>
-        private void RenderCoverage(GapAnalysisResult result, CoverageBar bar, Label label,
-            string sideLabel, string host, DateTime from, DateTime to)
+        /// <summary>Packs one server's analysis into the data the timeline track needs.</summary>
+        private TimelineTrackData BuildTrack(GapAnalysisResult result, string sideLabel, string host,
+            bool feasibilityKnown, List<TimeRange> fillable, List<TimeRange> unfillable,
+            List<TimeRange> backfilled)
         {
-            if (result != null && result.HasData)
+            if (result == null)
             {
-                string tag = result.TagName ?? "(tag)";
-                bar.TooltipLabel = $"{host} · {tag}";
-                bar.SetData(from, to, result.Gaps, result.CoverageRatio);
-                label.Text = $"{sideLabel}: {host}  ·  {tag}";
-            }
-            else if (result != null)
-            {
-                // Analyzed, but zero samples in the range → render as "fully missing" (red 0%)
-                string tag = result.TagName ?? "(tag)";
-                var wholeSpan = new List<GapWindow>
+                return new TimelineTrackData
                 {
-                    new GapWindow { Start = from, End = to }
+                    Label = string.IsNullOrWhiteSpace(host) ? sideLabel : $"{sideLabel} · {host}",
+                    CoverageRatio = -1,
+                    EmptyText = string.IsNullOrWhiteSpace(host) ? "not connected" : "not analyzed"
                 };
-                bar.TooltipLabel = $"{host} · {tag} · no data";
-                bar.SetData(from, to, wholeSpan, 0.0);
-                label.Text = string.IsNullOrWhiteSpace(host)
-                    ? $"{sideLabel} — not connected"
-                    : $"{sideLabel}: {host}  ·  {tag}  ·  no data";
             }
-            else
+
+            string tag = result.TagName ?? "(tag)";
+            // The gap rule is shown right on the track so "why is/isn't this red" is
+            // never a black box (derived from THIS tag's own sampling cadence).
+            string rule = result.HasData && result.GapThreshold > TimeSpan.Zero
+                ? $"   ·   gap rule: silence > {FormatDuration(result.GapThreshold)}"
+                : "";
+            return new TimelineTrackData
             {
-                bar.Clear();
-                label.Text = string.IsNullOrWhiteSpace(host)
-                    ? $"{sideLabel} — not analyzed"
-                    : $"{sideLabel}: {host}  ·  not analyzed";
+                Label            = $"{sideLabel} · {host} · {tag}" + (result.HasData ? rule : "  (no data)"),
+                CoverageRatio    = result.HasData ? result.CoverageRatio : 0.0,
+                HasData          = result.HasData,
+                FeasibilityKnown = feasibilityKnown,
+                FillableGaps     = fillable   ?? new List<TimeRange>(),
+                UnfillableGaps   = unfillable ?? new List<TimeRange>(),
+                Backfilled       = backfilled ?? new List<TimeRange>()
+            };
+        }
+
+        /// <summary>
+        /// Merged runs of the samples a <see cref="SyncPlanner"/> plan would copy.
+        /// Drives the amber copy-candidates strip — by construction the strip shows
+        /// exactly what a backfill would write, nothing phantom.
+        /// </summary>
+        private static List<CopyableSegment> SegmentsFromPlan(SyncPlan plan, bool toSecondary)
+            => SyncPlanner.ToSegments(plan, toSecondary);
+
+        /// <summary>
+        /// Merged time ranges this tool has written to <paramref name="host"/> for
+        /// <paramref name="tag"/> (non-reverted journal entries, clipped to the window).
+        /// Shown as the blue "backfilled by this tool" band; reverted runs disappear again.
+        /// </summary>
+        private List<TimeRange> LoadBackfilledRanges(string host, string tag, DateTime from, DateTime to)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(host)) return new List<TimeRange>();
+
+                var ticks = new List<DateTime>();
+                foreach (var entry in BackfillJournalService.LoadAll())
+                {
+                    if (entry.Reverted || entry.Tags == null) continue;
+                    if (!string.Equals(entry.TargetHost, host, StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (var t in entry.Tags)
+                    {
+                        if (t.Ticks == null) continue;
+                        if (!string.Equals(t.TagName, tag, StringComparison.OrdinalIgnoreCase)) continue;
+                        foreach (var tk in t.Ticks)
+                        {
+                            var dt = new DateTime(tk);
+                            if (dt >= from && dt <= to) ticks.Add(dt);
+                        }
+                    }
+                }
+                if (ticks.Count == 0) return new List<TimeRange>();
+
+                ticks.Sort();
+                TimeSpan median = IntervalBuilder.MedianInterval(ticks);
+                TimeSpan mergeGap = TimeSpan.FromTicks(
+                    Math.Max(median.Ticks * 3, _gapAnalysis.BatchSize.Ticks));
+                return IntervalBuilder.MergePoints(ticks, mergeGap, TimeSpan.FromSeconds(1))
+                    .Select(m => m.Range)
+                    .ToList();
             }
+            catch { return new List<TimeRange>(); }
         }
 
         // Cross-server diff rows for the selected tag(s), computed in RunGapAnalysis from the
@@ -1942,30 +2310,22 @@ namespace HistorianSyncTool.Forms
         private List<DiffSummaryRow> _lastDiffRows = new List<DiffSummaryRow>();
 
         /// <summary>
-        /// Counts whole-second timestamps present on <paramref name="hasSide"/> but absent on
-        /// <paramref name="lacksSide"/> (the cross-server diff, matching backfill's resolution).
-        /// Returns null if either list is missing (server not connected) or nothing is missing.
+        /// Adds a table row for one direction's sync plan (skipped when nothing to copy).
+        /// The counts come from <see cref="SyncPlanner"/> — the same numbers a backfill
+        /// would actually write.
         /// </summary>
-        private static DiffSummaryRow BuildDiffRow(string tag, string direction, bool toSecondary,
-            List<DateTime> hasSide, List<DateTime> lacksSide)
+        private static void AddPlanRow(List<DiffSummaryRow> rows, string tag, bool toSecondary, SyncPlan plan)
         {
-            if (hasSide == null || lacksSide == null) return null;
-            var lackTicks = new HashSet<long>(lacksSide.Select(SampleFilter.ToSecondTicks));
-            int count = 0;
-            DateTime? first = null, last = null;
-            foreach (var t in hasSide)
+            if (plan == null || plan.ToCopy.Count == 0) return;
+            rows.Add(new DiffSummaryRow
             {
-                if (lackTicks.Contains(SampleFilter.ToSecondTicks(t))) continue;
-                count++;
-                if (first == null || t < first) first = t;
-                if (last  == null || t > last)  last  = t;
-            }
-            if (count == 0) return null;
-            return new DiffSummaryRow
-            {
-                Tag = tag, Direction = direction, ToSecondary = toSecondary,
-                Count = count, First = first, Last = last
-            };
+                Tag         = tag,
+                Direction   = toSecondary ? "Primary → Secondary" : "Secondary → Primary",
+                ToSecondary = toSecondary,
+                Count       = plan.ToCopy.Count,
+                First       = plan.ToCopy[0],
+                Last        = plan.ToCopy[plan.ToCopy.Count - 1]
+            });
         }
 
         private void PopulateDiffGrid()
@@ -1973,20 +2333,77 @@ namespace HistorianSyncTool.Forms
             gridGaps.Rows.Clear();
             foreach (var r in _lastDiffRows)
             {
-                string shortDir = r.ToSecondary ? "→ Secondary" : "→ Primary";
+                string missingOn = r.ToSecondary ? "Secondary" : "Primary";
                 string range = (r.First.HasValue && r.Last.HasValue)
                     ? $"{r.First.Value:MM-dd HH:mm} → {r.Last.Value:MM-dd HH:mm}"
                     : "—";
-                int rowIdx = gridGaps.Rows.Add(r.Tag, shortDir, r.Count.ToString("N0"), range);
+                int rowIdx = gridGaps.Rows.Add(r.Tag, missingOn, r.Count.ToString("N0"), range);
                 var row = gridGaps.Rows[rowIdx];
                 row.DefaultCellStyle.BackColor = r.ToSecondary ? AppTheme.RowAlt : AppTheme.RowAltWarm;
-                // Columns are narrow in the right panel — full text on hover.
-                row.Cells["Tag"].ToolTipText = r.Tag;
-                row.Cells["Direction"].ToolTipText = r.Direction;   // e.g. "Primary → Secondary"
-                row.Cells["Range"].ToolTipText = (r.First.HasValue && r.Last.HasValue)
-                    ? $"{r.First.Value:yyyy-MM-dd HH:mm:ss} → {r.Last.Value:yyyy-MM-dd HH:mm:ss}"
-                    : "—";
+
+                // Columns are narrow in the right panel — a full plain-language sentence
+                // on hover explains exactly what the row means.
+                string source = r.ToSecondary ? "Primary" : "Secondary";
+                string full = $"A backfill would copy {r.Count:N0} sample(s) of '{r.Tag}' from {source} to {missingOn}.";
+                if (r.First.HasValue && r.Last.HasValue)
+                    full += $"\n{r.First.Value:yyyy-MM-dd HH:mm:ss} → {r.Last.Value:yyyy-MM-dd HH:mm:ss}";
+                full += $"\n(Same rule the backfill uses — independent collector streams are not double-copied.)" +
+                        $"\nClick the row to zoom the timeline to this period.";
+                foreach (DataGridViewCell cell in row.Cells)
+                    cell.ToolTipText = full;
             }
+            lblDiffHint.Visible = _lastDiffRows.Count > 0;
+        }
+
+        private async void gridGaps_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (_isBusy) return;
+            if (e.RowIndex < 0 || e.RowIndex >= _lastDiffRows.Count) return;
+            var r = _lastDiffRows[e.RowIndex];
+            if (!r.First.HasValue || !r.Last.HasValue) return;
+            long pad = Math.Max((r.Last.Value - r.First.Value).Ticks / 10,
+                                TimeSpan.FromSeconds(30).Ticks);
+            await ZoomTo(r.First.Value - new TimeSpan(pad), r.Last.Value + new TimeSpan(pad));
+        }
+
+        // ── Timeline zoom ──────────────────────────────────────────────────────────
+
+        /// <summary>Remembers the current range, sets the pickers to [from,to], re-analyzes.</summary>
+        private async Task ZoomTo(DateTime from, DateTime to)
+        {
+            if (_isBusy) return;
+            from = ClampPickerRange(from);
+            to   = ClampPickerRange(to);
+            if (to <= from) return;
+
+            _zoomStack.Push((dtpStart.Value, dtpEnd.Value));
+            lnkZoomOut.Visible = true;
+            await SetRangeAndAnalyze(from, to);
+        }
+
+        private async void lnkZoomOut_Click(object sender, EventArgs e)
+        {
+            if (_isBusy || _zoomStack.Count == 0) return;
+            var prev = _zoomStack.Pop();
+            lnkZoomOut.Visible = _zoomStack.Count > 0;
+            await SetRangeAndAnalyze(prev.From, prev.To);
+        }
+
+        private async Task SetRangeAndAnalyze(DateTime from, DateTime to)
+        {
+            // Zoom/zoom-back sets the pickers then analyzes explicitly. Date-picker
+            // ValueChanged no longer auto-runs, so no suppression guard is needed.
+            dtpStart.Value = from;
+            dtpEnd.Value   = to;
+            _gapAutoAnalyzeTimer?.Stop();
+            await RunGapAnalysis(from, to);
+        }
+
+        private static DateTime ClampPickerRange(DateTime value)
+        {
+            if (value < DateTimePicker.MinimumDateTime) return DateTimePicker.MinimumDateTime;
+            if (value > DateTimePicker.MaximumDateTime) return DateTimePicker.MaximumDateTime;
+            return value;
         }
 
         private static string FormatDuration(TimeSpan ts)
@@ -1997,10 +2414,6 @@ namespace HistorianSyncTool.Forms
                 return $"{(int)ts.TotalHours}h {ts.Minutes}m";
             return $"{ts.Minutes}m {ts.Seconds}s";
         }
-
-        // ── Stop / Cancel ──────────────────────────────────────────────────────────
-        private void btnStop_Click(object sender, EventArgs e)   => CancelCurrentOperation();
-        private void btnCancel_Click(object sender, EventArgs e) => CancelCurrentOperation();
 
         // ── Log panel ──────────────────────────────────────────────────────────────
         private void btnClearLog_Click(object sender, EventArgs e) => txtLog.Clear();

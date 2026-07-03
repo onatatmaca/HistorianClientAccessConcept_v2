@@ -1,3 +1,4 @@
+using HistorianSyncTool.Models;
 using HistorianSyncTool.Services;
 using HistorianSyncTool.UI;
 using HistorianSyncTool.UI.Controls;
@@ -43,6 +44,23 @@ namespace HistorianSyncTool.Forms
         private int _p2sRows;
         private int _s2pRows;
 
+        // ── Per-tag mini timeline ──────────────────────────────────────────────────
+        // Interval data is derived while the diff pass already holds each tag's sample
+        // lists — only merged ranges are kept (a few dozen structs per tag), never the
+        // raw samples, so hundreds of tags stay cheap in a 32-bit process.
+        private readonly GapTimeline _tagTimeline;
+        private readonly Label _lblTimelineTag;
+        private readonly Dictionary<string, TagPreview> _previews =
+            new Dictionary<string, TagPreview>(StringComparer.OrdinalIgnoreCase);
+
+        private sealed class TagPreview
+        {
+            public double PriCoverage, SecCoverage;
+            public int PriCount, SecCount;
+            public List<TimeRange> PriFill, PriUnfill, SecFill, SecUnfill;
+            public List<CopyableSegment> Copyable;
+        }
+
         public List<string> SelectedPrimaryToSecondary { get; private set; } = new List<string>();
         public List<string> SelectedSecondaryToPrimary { get; private set; } = new List<string>();
 
@@ -63,8 +81,8 @@ namespace HistorianSyncTool.Forms
 
             // ── Form ──────────────────────────────────────────────────────────────
             Text            = "Preview & Backfill — both directions";
-            Size            = new Size(940, 580);
-            MinimumSize     = new Size(720, 440);
+            Size            = new Size(940, 720);
+            MinimumSize     = new Size(720, 560);
             StartPosition   = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox     = true;
@@ -131,12 +149,44 @@ namespace HistorianSyncTool.Forms
             pnlButtons.Controls.Add(_btnStart);
             pnlButtons.Controls.Add(_btnCancel);
 
-            // Add in reverse dock order
-            Controls.Add(_split);        // Fill
-            Controls.Add(_progress);     // Top
-            Controls.Add(_lblProgress);  // Top
-            Controls.Add(_lblSummary);   // Top
-            Controls.Add(pnlButtons);    // Bottom
+            // ── Per-tag timeline (bottom): click a tag row above to see both servers'
+            //    coverage for that tag on one shared axis, with copy candidates in amber.
+            var pnlTagTimeline = new Panel
+            {
+                Dock = DockStyle.Bottom, Height = 158,
+                BackColor = AppTheme.Surface, Padding = new Padding(12, 2, 12, 6)
+            };
+            pnlTagTimeline.Paint += (s, e) =>
+                e.Graphics.DrawLine(new Pen(AppTheme.Border), 0, 0, pnlTagTimeline.Width, 0);
+
+            _lblTimelineTag = new Label
+            {
+                Text = "TAG TIMELINE — select a tag above",
+                Dock = DockStyle.Top, Height = 22,
+                Font = AppTheme.SectionLabel, ForeColor = AppTheme.Navy,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            _tagTimeline = new GapTimeline
+            {
+                Dock = DockStyle.Fill,
+                Compact = true,
+                AllowZoom = false
+            };
+            _tagTimeline.Clear("Select a tag above to see where its data sits on both servers.");
+            pnlTagTimeline.Controls.Add(_tagTimeline);     // Fill
+            pnlTagTimeline.Controls.Add(_lblTimelineTag);  // Top
+
+            // Add in reverse dock order (later-added edge panels dock closer to the edge,
+            // so the button row stays outermost below the timeline).
+            Controls.Add(_split);          // Fill
+            Controls.Add(_progress);       // Top
+            Controls.Add(_lblProgress);    // Top
+            Controls.Add(_lblSummary);     // Top
+            Controls.Add(pnlTagTimeline);  // Bottom (inner)
+            Controls.Add(pnlButtons);      // Bottom (outermost)
+
+            _gridP2S.SelectionChanged += (s, e) => ShowPreviewForSelection(_gridP2S);
+            _gridS2P.SelectionChanged += (s, e) => ShowPreviewForSelection(_gridS2P);
 
             AcceptButton = _btnStart;
             CancelButton = _btnCancel;
@@ -238,6 +288,7 @@ namespace HistorianSyncTool.Forms
 
                 int p2s = 0, s2p = 0;
                 DateTime? p2sFirst = null, p2sLast = null, s2pFirst = null, s2pLast = null;
+                TagPreview preview = null;
 
                 try
                 {
@@ -246,23 +297,21 @@ namespace HistorianSyncTool.Forms
                     try { secData = _dataService.ReadRawInRange(_secondaryConn, tag, _rangeStart, _rangeEnd); }
                     catch { secData = new List<(DateTime, float, double)>(); }
 
-                    var priTicks = new HashSet<long>(priData.Select(s => SampleFilter.ToSecondTicks(s.Time)));
-                    var secTicks = new HashSet<long>(secData.Select(s => SampleFilter.ToSecondTicks(s.Time)));
+                    // SyncPlanner = the same planner the backfill itself uses, so the
+                    // listed counts are exactly what pressing Start would write.
+                    var priTimes = priData.Select(s => s.Time).ToList();
+                    var secTimes = secData.Select(s => s.Time).ToList();
+                    var planP2S = SyncPlanner.PlanWithConfig(priTimes, secTimes, _rangeStart, _rangeEnd);
+                    var planS2P = SyncPlanner.PlanWithConfig(secTimes, priTimes, _rangeStart, _rangeEnd);
 
-                    foreach (var s in priData)
-                        if (!secTicks.Contains(SampleFilter.ToSecondTicks(s.Time)))
-                        {
-                            p2s++;
-                            if (p2sFirst == null || s.Time < p2sFirst) p2sFirst = s.Time;
-                            if (p2sLast  == null || s.Time > p2sLast)  p2sLast  = s.Time;
-                        }
-                    foreach (var s in secData)
-                        if (!priTicks.Contains(SampleFilter.ToSecondTicks(s.Time)))
-                        {
-                            s2p++;
-                            if (s2pFirst == null || s.Time < s2pFirst) s2pFirst = s.Time;
-                            if (s2pLast  == null || s.Time > s2pLast)  s2pLast  = s.Time;
-                        }
+                    p2s = planP2S.ToCopy.Count;
+                    if (p2s > 0) { p2sFirst = planP2S.ToCopy[0]; p2sLast = planP2S.ToCopy[p2s - 1]; }
+                    s2p = planS2P.ToCopy.Count;
+                    if (s2p > 0) { s2pFirst = planS2P.ToCopy[0]; s2pLast = planS2P.ToCopy[s2p - 1]; }
+
+                    // Distill the sample lists into interval data for the mini timeline
+                    // while we still hold them (they are not kept beyond this iteration).
+                    preview = BuildPreview(priData, secData, planP2S, planS2P);
                 }
                 catch { /* tag failed on source read — skip; backfill will report any real errors */ }
 
@@ -270,8 +319,10 @@ namespace HistorianSyncTool.Forms
                 int idx = i;
                 int cp2s = p2s, cs2p = s2p;
                 DateTime? pf = p2sFirst, pl = p2sLast, sf = s2pFirst, sl = s2pLast;
+                TagPreview pv = preview;
                 BeginInvoke((Action)(() =>
                 {
+                    if (pv != null) _previews[tag] = pv;
                     if (cp2s > 0) { _gridP2S.Rows.Add(true, tag, cp2s.ToString("N0"), RangeText(pf, pl)); _p2sRows++; }
                     if (cs2p > 0) { _gridS2P.Rows.Add(true, tag, cs2p.ToString("N0"), RangeText(sf, sl)); _s2pRows++; }
                     _progress.Value = Math.Min(idx + 1, _progress.Maximum);
@@ -301,6 +352,85 @@ namespace HistorianSyncTool.Forms
 
         private static string RangeText(DateTime? a, DateTime? b) =>
             (a.HasValue && b.HasValue) ? $"{a.Value:MM-dd HH:mm} → {b.Value:MM-dd HH:mm}" : "—";
+
+        /// <summary>
+        /// Distills one tag's sample lists into merged intervals for the mini timeline:
+        /// coverage per server, red/gray gap split (other-server-has-it vs missing-on-both)
+        /// and the amber copy-candidate runs — the same semantics as the main timeline.
+        /// </summary>
+        private TagPreview BuildPreview(
+            List<(DateTime Time, float Value, double Quality)> priData,
+            List<(DateTime Time, float Value, double Quality)> secData,
+            SyncPlan planP2S, SyncPlan planS2P)
+        {
+            var priTimes = priData.Select(s => s.Time).ToList();
+            var secTimes = secData.Select(s => s.Time).ToList();
+
+            // Per-side gap rule (same statistic the gap detector uses) so green rendering
+            // matches what actually counts as missing data for this tag's cadence.
+            var cfg = SyncPlanner.ReadConfig();
+            var priCov  = IntervalBuilder.CoverageIntervals(priTimes,
+                SyncPlanner.GapRule(priTimes, cfg.Floor, cfg.Multiplier));
+            var secCov  = IntervalBuilder.CoverageIntervals(secTimes,
+                SyncPlanner.GapRule(secTimes, cfg.Floor, cfg.Multiplier));
+            var priGaps = IntervalBuilder.Complement(_rangeStart, _rangeEnd, priCov);
+            var secGaps = IntervalBuilder.Complement(_rangeStart, _rangeEnd, secCov);
+
+            double total = Math.Max(1, (_rangeEnd - _rangeStart).Ticks);
+            var preview = new TagPreview
+            {
+                PriCount    = priTimes.Count,
+                SecCount    = secTimes.Count,
+                PriCoverage = 1.0 - priGaps.Sum(gp => (double)gp.Duration.Ticks) / total,
+                SecCoverage = 1.0 - secGaps.Sum(gp => (double)gp.Duration.Ticks) / total,
+                // red = the other server has data there; gray = nobody does
+                PriFill   = IntervalBuilder.Intersect(priGaps, secCov),
+                PriUnfill = IntervalBuilder.Intersect(priGaps, secGaps),
+                SecFill   = IntervalBuilder.Intersect(secGaps, priCov),
+                SecUnfill = IntervalBuilder.Intersect(secGaps, priGaps),
+                Copyable  = new List<CopyableSegment>()
+            };
+            preview.Copyable.AddRange(SyncPlanner.ToSegments(planP2S, toSecondary: true));
+            preview.Copyable.AddRange(SyncPlanner.ToSegments(planS2P, toSecondary: false));
+            return preview;
+        }
+
+        /// <summary>Shows the mini timeline for the tag selected in either grid.</summary>
+        private void ShowPreviewForSelection(DataGridView grid)
+        {
+            if (grid.SelectedRows.Count == 0) return;
+            string tag = grid.SelectedRows[0].Cells["Tag"].Value as string;
+            if (string.IsNullOrEmpty(tag)) return;
+
+            TagPreview pv;
+            if (!_previews.TryGetValue(tag, out pv))
+            {
+                _lblTimelineTag.Text = $"TAG TIMELINE — {tag}";
+                _tagTimeline.Clear("still comparing this tag…");
+                return;
+            }
+
+            _lblTimelineTag.Text = $"TAG TIMELINE — {tag}";
+            var top = new TimelineTrackData
+            {
+                Label            = $"PRIMARY · {pv.PriCount:N0} samples",
+                CoverageRatio    = pv.PriCoverage,
+                HasData          = pv.PriCount > 0,
+                FeasibilityKnown = true,
+                FillableGaps     = pv.PriFill,
+                UnfillableGaps   = pv.PriUnfill
+            };
+            var bottom = new TimelineTrackData
+            {
+                Label            = $"SECONDARY · {pv.SecCount:N0} samples",
+                CoverageRatio    = pv.SecCoverage,
+                HasData          = pv.SecCount > 0,
+                FeasibilityKnown = true,
+                FillableGaps     = pv.SecFill,
+                UnfillableGaps   = pv.SecUnfill
+            };
+            _tagTimeline.SetData(_rangeStart, _rangeEnd, top, bottom, pv.Copyable);
+        }
 
         private static void SetAllChecked(DataGridView grid, bool state)
         {

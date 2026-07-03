@@ -1,11 +1,121 @@
 ---
-description: Bugs fixed in v2 (phases 5–6) and open items. v1 history lives in known-issues-v1.md.
+description: Bugs fixed in v2 (phase 8+) and open items. Older resolved items in known-issues-archive.md, v1 history in known-issues-v1.md.
 ---
 
 # Known Issues — v2
 
-v2 bugs and design defects caught during development and their resolutions.
-For v1 pitfalls to avoid, see [`known-issues-v1.md`](known-issues-v1.md).
+Current v2 bugs/design defects and their resolutions. Phases 5–6 (resolved & stable)
+moved to [`known-issues-archive.md`](known-issues-archive.md); v1 pitfalls are in
+[`known-issues-v1.md`](known-issues-v1.md).
+
+---
+
+## BUG: Coverage collapsed on deadband tags — median-based gap rule (fixed Phase 10)
+**Location:** `GapAnalysisService.Analyze`
+
+Real plant tag TEMP_02_WS logs every ~6 min (median) but normally stays quiet 30–60 min
+(deadband). `threshold = max(median×1.5, 120s)` ≈ 9.5 min flagged every normal quiet
+period → 41% coverage shown for a healthy tag. **Fix:** per-tag rule =
+`max(p90(intervals) × GapThresholdMultiplier, MinimumGapSeconds)` — if ≥10% of a tag's
+intervals reach a duration, that duration is its cadence. The `Percentile` index is
+capped below the max so a lone real outage in a sparse window can't masquerade as
+cadence. Rule shown on each timeline track ("gap rule: silence > 1h 0m"). Verified
+live: TEMP_02_WS now 100%/100% on the exact window that showed 41%.
+
+## BUG: Exact-second diff = phantom copies on redundant collectors (fixed Phase 10)
+**Location:** everywhere the whole-second diff ran → new `Services/SyncPlanner`
+
+The two plant servers collect INDEPENDENTLY — same values logged seconds apart
+(offsets 5–120s). The exact-second diff reported them all as "missing": measured live,
+GASDRUCK_01_GAA showed 33,376 of 47,474 samples "missing" when ~98 genuinely were;
+TEMP_02_WS showed 707 where 599 had an identical-value partner within 30s. A backfill
+would have permanently interleaved both collectors' streams (double density, both
+directions, every tag). **Fix:** `SyncPlanner.Plan` auto-detects per tag:
+exact-second match rate ≥90% ⇒ aligned streams (same-source data, e.g. HistSync or
+tool-written) → keep exact diff (catches isolated misses); otherwise → copy ONLY
+source samples inside real TARGET OUTAGES (silence > the tag's own gap rule).
+ExecuteBackfill, both preview dialogs, the amber strip and the missing-data table all
+use the same planner — every surface shows what a backfill would actually write.
+
+## BUG: ReadRawInRange paged to the archive end + server cursor-leak trap (fixed Phase 10)
+**Location:** `HistorianDataService.ReadRawInRange`
+
+Despite the Phase 9 claim, it still ran `RawByTimeQuery` to the END of the archive and
+clipped client-side (a 13-day window on the 2-year Genthin archive read ~50× too much).
+The naive fix — breaking out of the pagination early — LEAKS a server-side cursor per
+abandoned query until expiry (verified live: "Maximum number of cached items exceeded",
+which then fails later queries too). **Fix:** bounded `RawByNumberQuery` chunks
+(5000/call, each drained), stopping at the range end. Never abandon a paged RawByTime
+query — that applies to any script touching the API as well.
+
+## BUG: "We can backfill forever" on live servers — live-edge diff (fixed Phase 9)
+**Location:** `Forms/MainForm.cs` · `ExecuteBackfill`, preview dialogs
+
+With the evaluation end at "now", every diff run found samples the target "lacked" that
+were simply still in flight (source collector writes first; the mirror lags seconds).
+Each backfill run therefore always reported something new to copy — feeling like an
+endless backfill even on perfectly healthy servers.
+
+**Fix:** every write path clamps the evaluation end to `now − LiveEdgeGraceSeconds`
+(app.config, default 120s): `ExecuteBackfill` itself, both Copy buttons (so the
+TagSelectionDialog counts match what is written), Preview & Backfill, and scheduled
+runs. Gap ANALYSIS is intentionally not clamped — the display tells the truth;
+only write planning ignores the live edge.
+
+Note the remaining, *correct* reasons coverage never reaches 100 %:
+- **Gaps present on BOTH servers** (plant outage / tag logged nothing) can never be
+  filled by a sync — the timeline now shows these gray ("missing on both") instead of
+  red, so they stop looking like sync failures.
+- Samples the target **rejects/compresses** are honestly reported failed each run
+  (see the Phase 8 whole-second verify) instead of silently "succeeding".
+
+---
+
+## BUG: Gap analysis read to the end of the archive (fixed Phase 9)
+**Location:** `Forms/MainForm.cs` · `SafeReadTimes`
+
+`SafeReadTimes` used `ReadRaw(conn, tag, from)` — a RawByTime query paged until the
+END of the archive — then filtered to `[from, to]` client-side. With real plant data
+(2+ years of archive) analyzing one week at the start of the archive read months of
+samples for nothing. Now uses `ReadRawInRange` (stops paging at the range end).
+
+---
+
+## RESOLVED: IP addresses + custom ports now supported (Phase 9)
+**Location:** `Services/HostInputParser`, `Services/ProficyEndpoint`, `HistorianConnectionService`
+
+Raw API behavior: connecting with an IP fails WCF's DNS-identity check (*"expected DNS
+identity … but the remote endpoint provided DNS claim 'TESTSV1'"*) —
+`CertificateValidationMode.None` does NOT bypass it and `ConnectionProperties` has no
+identity override or port property (verified by reflection + decompilation).
+
+**v2 solution** — both server fields accept `host`, `host:port`, `ip`, `ip:port`:
+- **Port**: the API builds its net.tcp URI from the public static
+  `HistorianAddress.TcpPort` (default 13000, or the `TcpPortNumber` appSetting).
+  `ProficyEndpoint.SetPortForNextConnect` sets it immediately before each Connect
+  (connections open sequentially, so per-server ports work).
+- **IP**: `ProficyEndpoint.PrepareForIp` prebuilds the WCF channel factory exactly as
+  `ServerConnection.Connect()` would (replicated from the decompiled 1.6.1.0 assembly)
+  but swaps in an `IdentityVerifier` that skips ONLY the DNS-name comparison. TLS and
+  the configured certificate validation mode still apply. Hostname connects never take
+  this path — they keep the full vendor-stock identity check. If a future ClientAccess
+  version changes internals, the helper throws a clear "use the hostname" message.
+- Verified live: app connected to 192.168.50.186/.187 by IP, browsed, analyzed and
+  previewed real data. (The server does NOT host the `Unsecured` endpoint, so that
+  simpler path was not available.)
+
+Optional login for remote servers that reject empty usernames: app.config
+`HistorianUsername` / `HistorianPassword` (empty = Windows session, the normal case
+when the tool runs on the Historian box itself).
+
+---
+
+## DOC FIX: IData.Add's second argument is errorOnReplace, not "allowOutOfOrder"
+Verified by reflecting the v1.6.1.0 DLL: `Add(DataSet dataset, Boolean errorOnReplace,
+ItemErrors& errors)`. Passing `false` (as we always did) means "silently replace an
+existing sample at the same timestamp" — which is what backfill wants. The old
+`historian-api.md` claim that it was an out-of-order flag was wrong; out-of-order
+historical writes need no flag at all.
 
 ---
 
@@ -42,124 +152,7 @@ compression) is correctly reported as failed instead of looping.
 
 ---
 
-## BUG: Per-Tag Gap Analysis Produces False Gaps on Bimodal/Deadband Data (v2)
-**Location:** `GapAnalysisService.Analyze`
-
-Tags with variable-interval sampling — bimodal (pairs 1s apart, then 15s) OR deadband
-(1s when changing, 30s+ when stable) — cause the median-based detector to latch onto
-the fast interval, then flag every normal quiet stretch as a gap. Observed symptom:
-hundreds of 0m16s "gaps" after a successful backfill, 17% coverage that should be ~95%.
-
-**Phase 5 attempt:** Gap analysis restricted to HistSync only (no per-tag option).
-**Phase 6 update (first pass):** Per-tag analysis re-enabled. To mitigate false positives,
-the threshold became `max(median × 1.5, MinimumGapSeconds)` with `MinimumGapSeconds=120`
-by default.
-**Phase 6 update (second pass):** The floor solved the noise but created a second problem
-— isolated missing samples (20-second gaps on Secondary while Primary has a sample) fell
-BELOW the floor, so gap analysis missed them and the backfill never tried to copy them.
-
-**Final fix:** Backfill no longer uses gap windows to decide what to copy. It reads both
-servers' samples for the full evaluation range and does a direct timestamp diff (source
-timestamps not present on target). Gap analysis is now ONLY for the UI display (coverage
-bars + gap grid), completely decoupled from backfill planning. See `sync-workflow.md`.
-
----
-
-## BUG: DateTimePicker Shows Arrows Instead of Calendar Dropdown (v2, fixed Phase 5)
-**Location:** `MakeDtp()` in `MainForm.Designer.cs`
-
-`ShowUpDown = true` caused DateTimePicker to show up/down arrows instead of a calendar popup.
-
-**Fix:** Changed to `ShowUpDown = false`.
-
----
-
-## BUG: Gap Grid Duration Column Cut Off (v2, fixed Phase 5)
-**Location:** `SetupGapGrid()` in `MainForm.Designer.cs`
-
-The gap grid used `FillWeight` on columns but didn't have `AutoSizeColumnsMode = Fill`, so
-the Duration column was truncated on the right edge.
-
-**Fix:** Added `gridGaps.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill`.
-
----
-
-## DESIGN: No UI Refresh After Backfill (v2, fixed Phase 5)
-After `ExecuteBackfill` completed, the gap analysis results, coverage bars, and data tables
-were not refreshed. The user had to manually re-run gap analysis to see updated coverage.
-
-**Phase 5:** Added `AutoRefreshAfterBackfill()` which calls `RunGapAnalysis` after every backfill.
-**Phase 6:** Extended to also re-read primary/secondary data grids and exit compare mode.
-
----
-
-## BUG: Verification failure was counted as success (v2, fixed Phase 6)
-**Location:** `Forms/MainForm.cs` · `ExecuteBackfill`
-
-The original flow incremented `tagResult.BatchesSucceeded++` immediately after write errors
-were empty — BEFORE the `VerifyWrite` read-after-write check ran. If verification reported
-`Actual < Expected`, the batch was still counted as succeeded and the mismatch was only
-appended to `tagResult.Errors`. The run report's success count was misleading.
-
-**Fix:** Gate `BatchesSucceeded` / `SamplesWritten` increments on both `writeOk` AND
-`verifyOk`. On verification failure, increment `BatchesFailed` instead.
-
----
-
-## BUG: CancellationTokenSource leaked on repeated operations (v2, fixed Phase 6)
-**Location:** `Forms/MainForm.cs` — every async handler
-
-Each long-running op did `_cts = new CancellationTokenSource()` without disposing the
-previous instance. Over a session with many operations, these accumulated.
-
-**Fix:** New `ResetCts()` helper disposes then re-allocates. `OnFormClosing` now disposes
-the final `_cts` and the auto-analyze `Timer`.
-
----
-
-## BUG: Empty-server side blocked backfill (v2, fixed Phase 6)
-**Location:** `Services/GapAnalysisService.Analyze`
-
-When a server had 0 samples for the evaluation period, `Analyze` returned early with
-`HasData=false` and an empty `Gaps` list. That meant:
-- `_lastSecondaryResult.HasGaps == false`, so the backfill flow skipped Secondary's
-  "direction" entirely and fell through to Primary's gaps
-- Primary's gaps couldn't backfill either (Secondary was empty = no source data)
-- User saw "No backfillable batches" even when the other side had plenty to copy
-
-**Fix:** When `sampleTimes.Count == 0` AND `evalFrom`/`evalTo` are defined, emit a single
-`GapWindow` spanning the entire evaluation period (split into batches). Now
-`MarkBackfillFeasibility` correctly identifies batches that overlap with the OTHER server's
-data, and the user can backfill the empty server from whichever samples exist on the source.
-
-Also in `btnBackfillPreview_Click`: rewrote the flow to offer only directions that have
-`batchCount > 0` instead of hard-coded "try Secondary first else Primary".
-
----
-
-## BUG: Verify false-negative due to sub-second timestamp rounding (v2, fixed Phase 6)
-**Location:** `Forms/MainForm.cs` · `ExecuteBackfill` verify step
-
-Observed in the field: after a successful write, the verify read returned `0 / 1` for
-single-sample batches and `59 / 60` for multi-sample batches. The write had succeeded
-(errors were empty), but verify was reporting a false failure. Root cause: my verify
-window was `[firstTime, lastTime + 1 tick)` (100 ns on the high end). Historian stores
-timestamps at **second-level precision** and rounds away sub-second components. For a
-sample written at `T = 12:54:30.123`, the stored timestamp is `12:54:30` — which is
-BEFORE the query start `12:54:30.123`, so the server returned nothing.
-
-**Fix:** widened verify to `[firstTime - 1s, lastTime + 1s]`. Historian's rounding is
-safely within ±1s. Over-counting nearby existing samples is acceptable because we check
-`actual >= expected`, not exact equality. Writes themselves were always correct; only the
-verification was lying. Users who saw false "100 failed" reports actually had their data
-written successfully — re-running backfill would see nothing missing and confirm sync.
-
----
-
-## NOTE: Proficy DataSet disposal — verified non-disposable (v2, closed Phase 6)
-`HistorianDataService` creates many `Proficy.Historian.ClientAccess.API.DataSet` instances
-via `new DataSet()` without `using` blocks. Per GE's Historian 2022/2023 API documentation,
-`DataSet` inherits directly from `System.Collections.Generic.Dictionary<string,IDataSamples>`
-and adds no interfaces — so it is **not `IDisposable`**. No `using` blocks needed; no leak.
-Source: GE Digital Historian ClientAccess API reference — DataSet class inheritance chain
-is `Object → Dictionary<TKey,TValue> → DataSet`.
+## NOTE: WinForms UIA quirks (dev tooling only)
+Driving the UI via UI Automation from scripts proved flaky for element enumeration on
+this form (buttons intermittently invisible to `FindAll`). The screenshot/verification
+scripts therefore click by coordinates. Not a product issue — end users don't use UIA.

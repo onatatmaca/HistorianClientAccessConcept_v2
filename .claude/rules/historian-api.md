@@ -30,6 +30,24 @@ sc.Disconnect(); // always call in Dispose / form close
 **v1 bug:** `ServerConnection` was never disposed. In v2, implement `IDisposable` on services
 that own connections and call `Disconnect()` in `Dispose()`.
 
+**IP addresses & the DNS-identity check:** the raw API rejects IP connects — WCF checks
+the server's claimed name ("expected DNS identity … but the remote endpoint provided
+DNS claim 'TESTSV1'") and `CertificateValidationMode.None` does not bypass that.
+v2 works around it: `Services/ProficyEndpoint.PrepareForIp` prebuilds the channel
+factory with a lenient `IdentityVerifier` (skips only the name comparison; TLS + cert
+validation mode stay on). Hostname connects keep the stock check. Scripts using the
+API directly must still connect by hostname.
+
+**Port:** no `ConnectionProperties` member — the URI port comes from the public static
+`Proficy...Internal.HistorianAddress.TcpPort` (default 13000) or the `TcpPortNumber`
+appSetting. v2 sets it per connect via `ProficyEndpoint.SetPortForNextConnect`, so the
+server fields accept `host:port`.
+
+**Credentials:** an empty username uses the Windows session (works on the Historian box
+itself). Remote servers may reject empty usernames — v2 reads optional
+`HistorianUsername` / `HistorianPassword` from app.config
+(`HistorianConnectionService.BuildProperties`).
+
 ## Tag Queries (Paginated)
 ```csharp
 TagQueryParams query = new TagQueryParams { PageSize = 100 };
@@ -102,7 +120,11 @@ writeSet[tagName] = new DataSamples<float>
 };
 ItemErrors writeErrors;
 sc.IData.Add(writeSet, false, out writeErrors);
-// second arg: allowOutOfOrder — set false unless explicitly backfilling out-of-order data
+// Second arg is errorOnReplace (verified by reflection on the 1.6.1.0 DLL:
+// Add(DataSet dataset, Boolean errorOnReplace, ItemErrors& errors)).
+// false = silently overwrite an existing sample at the same timestamp — right for
+// backfill. Out-of-order historical writes need NO flag (older docs here wrongly
+// called this "allowOutOfOrder").
 ```
 
 ## ItemErrors Handling

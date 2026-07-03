@@ -36,6 +36,9 @@ namespace HistorianSyncTool.Models
 
         public List<string> Errors { get; set; } = new List<string>();
 
+        /// <summary>Journal entry id this run was recorded under (null if nothing was written).</summary>
+        public string JournalId { get; set; }
+
         public TimeSpan Duration => CompletedAt - StartedAt;
     }
 }

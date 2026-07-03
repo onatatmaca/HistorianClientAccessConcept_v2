@@ -8,6 +8,9 @@ obj/
 # Packages
 packages/
 
+# Local copy of the proprietary GE Proficy API DLL (never commit)
+lib/
+
 # Generated
 *.Designer.cs.bak
 
