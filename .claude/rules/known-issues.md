@@ -10,6 +10,58 @@ moved to [`known-issues-archive.md`](known-issues-archive.md); v1 pitfalls are i
 
 ---
 
+## INCIDENT + OPEN DEFECTS: UTC frame vs `DateTime.Now` (2026-07-16, audited)
+
+**Proven** (live probes, see [`historian-api.md`](historian-api.md)): the API frame is **UTC**
+(returned `Kind=Utc`), and a `Local`/`Unspecified` **query start** is converted local→UTC, so the
+query **starts early by the UTC offset** (1 h winter / 2 h summer) and returns samples before `from`.
+
+### Data loss (external tooling, NOT the app) — fixed + data restored
+A throwaway helper read `[from,to]` with only `if (ts > to) break;` (**no `ts < from` guard**) and
+deleted every timestamp it read ⇒ **~1 h of Secondary data BEFORE the window was destroyed** (API
+hour `2026-02-09 23` = Historian-local `2026-02-10 00:00–01:00`); backfills, correctly scoped by
+`SyncPlanner`'s `t >= evalFrom`, never restored it. Restored from Primary (2,343 samples).
+**The app cannot do this**: its only `IData.Delete` consumes **journal ticks**, never a read
+(`MainForm.cs:1674`), and `SampleFilter.cs:35` has the `if (s.Time < start) continue;` guard.
+`IData.Delete` has no range overload (verified by reflection).
+
+### FIXED — the app now converts at the API boundary (single point)
+`HistorianDataService` gained `ToApi()` / `FromApi()`; **the API frame stops at that service and the
+rest of the app works in LOCAL time**. Applied to every crossing: query bounds, returned times,
+`WriteFloatSamplesWithQuality`, `DeleteSamples`, `ReadRaw`, `ReadInterpolated`. `ReadRawInRange`
+runs its chunk loop in UTC (`cursor = lastTs.AddTicks(1)` **preserves Kind** — never
+`new DateTime(ticks+1)`), clips in UTC, then hands back local.
+
+**Verified live** (2026-07-16, picker-style `Kind=Local` window `2026-02-10 00:00→00:03`): the app
+now returns `00:00:50=50.8, 00:01:00=51.1, 00:01:10=51.4 …` — **identical to Historian Trend**,
+`Kind=Local`. Previously it returned `00:00:40=51.3` (the UTC frame).
+
+This one change fixed **by construction**: the dead live-edge guard, the scheduler's future-window
+no-op, the empty "Last 1h" preset, the ~1–2 h window shift (first hour silently dropped: 8,383 read
+→ 8,167 kept), and `GapAnalysisService`'s phantom trailing gray band — all were `DateTime.Now`
+compared against UTC sample times; both sides are now local.
+
+Also fixed: reads now `ThrowOnItemErrors` (an errored read must never look like "no data" — that
+would force exact-diff on an empty target, mass-copy, journal it, and a later revert would delete
+pre-existing data). Verified live that an empty window **and** a nonexistent tag both return
+`ItemErrors=0`, so it cannot fire on the normal empty case. `LiveEdgeGraceSeconds` now requires
+`> 0` (a 0 grace disabled the write/collector race guard).
+
+**Journal frame — deliberately unchanged (this was the landmine):** journals on disk hold **UTC**
+ticks. Journaling now converts `bs.Time.ToUniversalTime()` and revert re-tags
+`new DateTime(tk, DateTimeKind.Utc)`, so **legacy and new entries revert identically with no
+migration**. Do NOT "simplify" this to local ticks — old journals would then delete at an instant
+1–2 h off, i.e. real plant data.
+
+**Never affected:** copied values always landed at the correct absolute instant (same frame both
+sides), and revert always deleted the correct instant (journal stores `long[] Ticks`, never
+`DateTime`, so the serializer never converted them). No data was ever corrupted by this class.
+
+**Still open:** revert reports *requested* not *confirmed* deletions (`MainForm.cs:1693`, no
+read-back) — fails safe (deletes nothing, but the message would be optimistic).
+
+---
+
 ## BUG: Coverage collapsed on deadband tags — median-based gap rule (fixed Phase 10)
 **Location:** `GapAnalysisService.Analyze`
 
@@ -116,39 +168,6 @@ ItemErrors& errors)`. Passing `false` (as we always did) means "silently replace
 existing sample at the same timestamp" — which is what backfill wants. The old
 `historian-api.md` claim that it was an out-of-order flag was wrong; out-of-order
 historical writes need no flag at all.
-
----
-
-## BUG: Backfill journal never saved (silent serialization crash) — Phase 8
-**Location:** `Models/BackfillJournal.cs` · `BackfillJournalEntry.RevertedLocal`
-
-Every backfill silently failed to journal → Backfill History always empty → nothing
-revertable. Root cause: `RevertedLocal` was a non-nullable `DateTime` defaulting to
-`DateTime.MinValue` (0001-01-01). `DataContractJsonSerializer` converts DateTime to UTC,
-and 0001-01-01 *local* → UTC underflows `DateTime.MinValue` in any timezone **ahead of UTC**
-(the dev/test site is UTC+1/+2), throwing `SerializationException`. `BackfillJournalService.Save`
-swallowed it in a bare `catch {}`, so it failed invisibly.
-
-**Fix:** `RevertedLocal` is now `DateTime?` (null until reverted) so the bad value is never
-serialized. Confirmed by a standalone save→load round-trip. (Lesson: don't serialize a
-default `DateTime` via DataContractJsonSerializer; use nullable or UTC ticks.)
-
----
-
-## BUG: Backfill re-copies the same samples forever; false "succeeded" — Phase 8
-**Location:** `Forms/MainForm.cs` · `ExecuteBackfill` diff + verify; `TagSelectionDialog`
-
-A backfill reported "succeeded" but coverage never changed and the same samples could be
-re-copied indefinitely. Root cause: the direct-comparison diff compared **exact ticks**.
-Historian stores at **second** precision, so a sub-second source sample (12:54:30.123) is
-stored as 12:54:30; the next diff sees the original tick as still missing and copies it again.
-The old ±1s **count-based** verify (`actual >= expected`) passed whenever *any* nearby sample
-existed, masking it as success.
-
-**Fix:** the diff, the verify, and the journaled timestamps all compare at whole-second
-resolution (`SampleFilter.ToSecondTicks`). The verify now confirms each written second is
-actually present (honest per-sample check), so a write that doesn't land (e.g. archive
-compression) is correctly reported as failed instead of looping.
 
 ---
 

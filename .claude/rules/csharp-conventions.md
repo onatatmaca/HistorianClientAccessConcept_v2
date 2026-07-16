@@ -52,7 +52,10 @@ These were private nested classes inside `Main` in v1. In v2 extract them to the
 
 ## Data Types
 - All tag data in this demo is `float` (filtering enforced at browse time)
-- Timestamps are `DateTime` (local time — Historian returns local by default)
+- Timestamps from the API are `DateTime` with **`Kind=Utc`** — the API frame is **UTC**, NOT local.
+  A `Local`/`Unspecified` query start is converted local→UTC and silently shifts the query by the
+  UTC offset (1 h winter / 2 h summer). Never mix `DateTime.Now`/picker values with API times.
+  See [`historian-api.md`](historian-api.md) — this is proven and is the root of a real bug class.
 - `DataSamples<float>` for write payloads; `DataSamples<MultiFieldValue>` for multi-field tags
 
 ## DO NOT

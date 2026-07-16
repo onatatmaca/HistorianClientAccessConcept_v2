@@ -83,8 +83,12 @@ namespace HistorianSyncTool.Forms
         {
             int seconds;
             string cfg = ConfigurationManager.AppSettings["LiveEdgeGraceSeconds"];
+            // > 0, not >= 0: a zero grace disables the race guard entirely — a collector could
+            // write into a second between the target read and our write, we'd replace it, verify
+            // would pass, and it would be journaled — so a later revert would delete a sample the
+            // tool never created.
             return TimeSpan.FromSeconds(
-                int.TryParse(cfg, out seconds) && seconds >= 0 ? seconds : 120);
+                int.TryParse(cfg, out seconds) && seconds > 0 ? seconds : 120);
         }
 
         // ── Last-browsed tag names per server (for the scheduler's tag multiselect) ──
@@ -1486,8 +1490,12 @@ namespace HistorianSyncTool.Forms
                                         ticks = new List<long>();
                                         writtenTicks[tag] = ticks;
                                     }
+                                    // Journal in UTC ticks. Sample times are LOCAL above the data
+                                    // service, but journals already on disk hold UTC ticks — keeping
+                                    // UTC means old and new entries revert identically, with no
+                                    // migration. RevertBackfill re-tags them Kind=Utc on the way out.
                                     foreach (var bs in batchSamples)
-                                        ticks.Add(SampleFilter.ToSecondTicks(bs.Time));
+                                        ticks.Add(SampleFilter.ToSecondTicks(bs.Time.ToUniversalTime()));
                                 }
                                 else
                                 {
@@ -1671,7 +1679,10 @@ namespace HistorianSyncTool.Forms
                         token.ThrowIfCancellationRequested();
                         var t = tags[i];
                         if (t.Ticks == null || t.Ticks.Length == 0) continue;
-                        var times = t.Ticks.Select(tk => new DateTime(tk)).ToList();
+                        // Journal ticks are UTC (both legacy and current entries). Tag them Kind=Utc
+                        // so the data service passes them straight through instead of re-converting
+                        // local->UTC — that would delete at an instant 1-2 h off, i.e. real data.
+                        var times = t.Ticks.Select(tk => new DateTime(tk, DateTimeKind.Utc)).ToList();
 
                         int idx = i;
                         Invoke((Action)(() =>
