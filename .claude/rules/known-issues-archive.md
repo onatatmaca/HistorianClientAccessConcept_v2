@@ -47,6 +47,29 @@ second-precision timestamps (12:54:30.123 is stored as 12:54:30, before the quer
 start). Widened to `[first − 1s, last + 1s]`. (Phase 8 later made verify per-sample
 at whole-second resolution — see `known-issues.md`.)
 
+## BUG: Backfill journal never saved (silent serialization crash) (fixed Phase 8)
+**Location:** `Models/BackfillJournal.cs` · `BackfillJournalEntry.RevertedLocal`
+
+Every backfill silently failed to journal → Backfill History always empty → nothing revertable.
+Root cause: `RevertedLocal` was a non-nullable `DateTime` defaulting to `DateTime.MinValue`
+(0001-01-01). `DataContractJsonSerializer` converts DateTime to UTC, and 0001-01-01 *local* → UTC
+underflows `DateTime.MinValue` in any timezone **ahead of UTC** (the dev/test site is UTC+1/+2),
+throwing `SerializationException`; `BackfillJournalService.Save` swallowed it in a bare `catch {}`.
+**Fix:** `RevertedLocal` is now `DateTime?` (null until reverted). (Lesson: don't serialize a
+default `DateTime` via DataContractJsonSerializer; use nullable or UTC ticks — the same lesson
+later immunized the journal's `long[] Ticks` against the 2026-07 UTC-frame bug class.)
+
+## BUG: Backfill re-copies the same samples forever; false "succeeded" (fixed Phase 8)
+**Location:** `Forms/MainForm.cs` · `ExecuteBackfill` diff + verify; `TagSelectionDialog`
+
+A backfill reported "succeeded" but coverage never changed and the same samples could be re-copied
+indefinitely. Root cause: the direct-comparison diff compared **exact ticks**, but Historian stores
+at **second** precision (12:54:30.123 → 12:54:30), so the next diff saw the original tick as still
+missing. The old ±1s **count-based** verify (`actual >= expected`) passed whenever *any* nearby
+sample existed, masking it. **Fix:** diff, verify and journaled timestamps all compare at
+whole-second resolution (`SampleFilter.ToSecondTicks`); verify confirms each written second is
+actually present, so a write that doesn't land is reported failed instead of looping.
+
 ## NOTE: Proficy DataSet is not IDisposable (closed Phase 6)
 Per GE docs, `DataSet` inherits `Dictionary<string,IDataSamples>` and adds no
 interfaces — no `using` needed, no leak.

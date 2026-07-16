@@ -19,6 +19,51 @@ namespace HistorianSyncTool.Services
             _maxRetries = maxRetries;
         }
 
+        // ── Time frame boundary ────────────────────────────────────────────────────
+        // The ClientAccess API works in UTC: every timestamp it returns has Kind=Utc, and a
+        // Local/Unspecified query start is silently converted local->UTC, shifting the query
+        // by the UTC offset (1 h winter / 2 h summer). Proven live 2026-07-16 — see
+        // `.claude/rules/historian-api.md`.
+        //
+        // THE REST OF THE APP WORKS IN LOCAL TIME (date pickers, DateTime.Now, all display),
+        // so this service is the ONE place that converts. Keep it that way: mixing the frames
+        // silently shifts windows by the UTC offset, because .NET compares raw Ticks and
+        // ignores Kind. Every DateTime crossing into or out of the API goes through these.
+
+        /// <summary>Local (or Unspecified-as-local) -> the API's UTC frame.</summary>
+        private static DateTime ToApi(DateTime t)
+        {
+            // ToUniversalTime(): Utc -> unchanged; Local/Unspecified -> converted using the
+            // DST offset in effect AT THAT DATE (not today's), which is what we want.
+            return DateTime.SpecifyKind(t.ToUniversalTime(), DateTimeKind.Utc);
+        }
+
+        /// <summary>The API's UTC frame -> local time for the rest of the app.</summary>
+        private static DateTime FromApi(DateTime t)
+        {
+            // SpecifyKind first: ToLocalTime() on an Unspecified value would be a no-op.
+            return DateTime.SpecifyKind(t, DateTimeKind.Utc).ToLocalTime();
+        }
+
+        /// <summary>
+        /// Never let a failed read look like "no data". Writes and deletes already inspect
+        /// ItemErrors; reads used to drop them on the floor and return an empty list, which is
+        /// indistinguishable from a genuinely empty range. That is dangerous on the TARGET side:
+        /// an empty target read makes SyncPlanner fall back to exact-diff and copy everything,
+        /// those writes get journaled, and a later revert would then delete samples the target
+        /// held all along. Throwing lets RetryHelper retry and, if it persists, surfaces it.
+        /// (Verified live: an empty window and even a nonexistent tag return ItemErrors=0, so
+        /// this cannot fire on the normal "no data here" case.)
+        /// </summary>
+        private static void ThrowOnItemErrors(ItemErrors errors, string tagName)
+        {
+            if (errors == null || errors.Count == 0) return;
+            var msgs = new List<string>();
+            foreach (var kv in errors) msgs.Add($"{kv.Key}: {kv.Value}");
+            throw new InvalidOperationException(
+                $"Historian read failed for '{tagName}': {string.Join("; ", msgs)}");
+        }
+
         // ── Tag Queries ────────────────────────────────────────────────────────────
 
         public List<Tag> BrowseTags(ServerConnection conn, string tagnameMask)
@@ -57,14 +102,15 @@ namespace HistorianSyncTool.Services
         {
             return RetryHelper.Retry(() =>
             {
-                DataQueryParams query = new InterpolatedQuery(from, to, (uint)count, tagName)
+                DataQueryParams query = new InterpolatedQuery(ToApi(from), ToApi(to), (uint)count, tagName)
                 {
                     Fields = DataFields.Time | DataFields.Value | DataFields.Quality
                 };
                 ItemErrors errors;
                 Proficy.Historian.ClientAccess.API.DataSet set = new Proficy.Historian.ClientAccess.API.DataSet();
                 conn.IData.Query(ref query, out set, out errors);
-                return SampleFilter.Parse(IterateDataSet(set, tagName));
+                return SampleFilter.Parse(IterateDataSet(set, tagName))
+                    .Select(s => (Time: FromApi(s.Time), s.Value, s.Quality)).ToList();
             }, _maxRetries);
         }
 
@@ -73,7 +119,7 @@ namespace HistorianSyncTool.Services
         {
             return RetryHelper.Retry(() =>
             {
-                DataQueryParams query = new RawByTimeQuery(from, tagName)
+                DataQueryParams query = new RawByTimeQuery(ToApi(from), tagName)
                 {
                     Fields = DataFields.Time | DataFields.Value | DataFields.Quality
                 };
@@ -83,7 +129,8 @@ namespace HistorianSyncTool.Services
                 while (conn.IData.Query(ref query, out page, out errors))
                     all.AddRange(page);
                 all.AddRange(page);
-                return SampleFilter.Parse(IterateDataSet(all, tagName));
+                return SampleFilter.Parse(IterateDataSet(all, tagName))
+                    .Select(s => (Time: FromApi(s.Time), s.Value, s.Quality)).ToList();
             }, _maxRetries);
         }
 
@@ -99,11 +146,13 @@ namespace HistorianSyncTool.Services
             ServerConnection conn, string tagName, DateTime start, DateTime end)
         {
             const uint chunk = 5000;
+            // Work in the API's UTC frame for the whole loop; convert back at the exit.
+            DateTime startUtc = ToApi(start), endUtc = ToApi(end);
             return RetryHelper.Retry(() =>
             {
                 var all = new List<(DateTime Time, object Value, double Quality)>();
-                DateTime cursor = start;
-                while (cursor <= end)
+                DateTime cursor = startUtc;   // Kind=Utc => the API sends it as-is (no shift)
+                while (cursor <= endUtc)
                 {
                     DataQueryParams query = new RawByNumberQuery(cursor, chunk, new[] { tagName })
                     {
@@ -114,10 +163,12 @@ namespace HistorianSyncTool.Services
                     ItemErrors errors;
                     Proficy.Historian.ClientAccess.API.DataSet set;
                     bool more = conn.IData.Query(ref query, out set, out errors);
+                    ThrowOnItemErrors(errors, tagName);
                     while (more) // drain any unexpected continuation pages of this chunk
                     {
                         Proficy.Historian.ClientAccess.API.DataSet extra;
                         more = conn.IData.Query(ref query, out extra, out errors);
+                        ThrowOnItemErrors(errors, tagName);
                         if (extra != null) set.AddRange(extra);
                     }
                     if (set == null || set.TotalSamples == 0) break;
@@ -129,14 +180,22 @@ namespace HistorianSyncTool.Services
                     {
                         n++;
                         lastTs = raw.Time;
-                        if (raw.Time > end) { pastEnd = true; break; }
+                        if (raw.Time > endUtc) { pastEnd = true; break; }
                         all.Add(raw);
                     }
                     if (pastEnd || n < (int)chunk) break;
+                    // AddTicks PRESERVES Kind=Utc. Never use `new DateTime(lastTs.Ticks + 1)`
+                    // here: that drops the Kind, so the API would re-convert local->UTC and
+                    // every chunk would re-read the previous 1-2 h (duplicate, unordered data).
                     cursor = lastTs.AddTicks(1); // next chunk starts after the last stored tick
                 }
 
-                return SampleFilter.ParseAndClip(all, start, end);
+                // Clip in the UTC frame (the API can return samples BEFORE the requested start),
+                // then hand local time back to the rest of the app.
+                var clipped = SampleFilter.ParseAndClip(all, startUtc, endUtc);
+                var result = new List<(DateTime Time, float Value, double Quality)>(clipped.Count);
+                foreach (var s in clipped) result.Add((FromApi(s.Time), s.Value, s.Quality));
+                return result;
             }, _maxRetries);
         }
 
@@ -184,7 +243,7 @@ namespace HistorianSyncTool.Services
             {
                 var msgs = RetryHelper.Retry(() =>
                 {
-                    var grpTimes  = grp.Value.Select(i => times[i]).ToArray();
+                    var grpTimes  = grp.Value.Select(i => ToApi(times[i])).ToArray();
                     var grpValues = grp.Value.Select(i => values[i]).ToArray();
 
                     Proficy.Historian.ClientAccess.API.DataSet set = new Proficy.Historian.ClientAccess.API.DataSet();
@@ -241,7 +300,7 @@ namespace HistorianSyncTool.Services
                     for (int i = 0; i < count; i++)
                     {
                         tagnames[i] = tagName;
-                        timeArr[i]  = times[offset + i];
+                        timeArr[i]  = ToApi(times[offset + i]);
                     }
                     ItemErrors errors;
                     conn.IData.Delete(tagnames, timeArr, out errors);

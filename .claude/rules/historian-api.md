@@ -72,6 +72,39 @@ sc.ITags.Query(ref q, out result);
 bool exists = result != null && result.Count > 0;
 ```
 
+## Timestamps — the API frame is UTC, and `DateTimeKind` changes your query (PROVEN)
+
+**The old claim "Historian returns local by default" was WRONG.** Measured live on TESTSV1
+(2026-07-16, `KindProbe.exe` / `DupCheck.exe`):
+
+- **Every returned timestamp has `Kind=Utc`.** A live-collecting tag's newest sample equalled
+  `DateTime.UtcNow`, **not** `DateTime.Now` (server in Germany, CEST +2).
+- **The `Kind` of the QUERY START silently shifts the query by the UTC offset:**
+
+  | start `Kind` | Feb (CET +1) | May (CEST +2) |
+  |---|---|---|
+  | `Unspecified` (`ParseExact`) | firstTs **−59.2 min** | **−110.8 min** |
+  | `Local` (a DateTimePicker) | **−59.2 min** | **−110.8 min** |
+  | `Utc` (API-derived) | **+0.7 min** ✅ | **+1.3 min** ✅ |
+
+  Local/Unspecified ⇒ the API converts local→UTC (correct per-date DST offset) ⇒ **the query starts
+  early by the offset and returns samples BEFORE the requested `from`**. `Kind=Utc` ⇒ sent as-is.
+
+### Rules that follow (non-negotiable)
+1. **Never let a read result reach a delete.** `IData.Delete(string[], DateTime[], out ItemErrors)`
+   is the ONLY overload — it has no range form, so it deletes exactly the ticks you pass. An
+   over-read + delete destroys data outside your window. This already happened once (see
+   `known-issues.md`). Delete only from the journal.
+2. **Always clip a read on BOTH bounds**: `if (ts > to) break;` is not enough — add
+   `if (ts < from) continue;` (a `continue`, never a `break`; the stream can start before `from`).
+   `SampleFilter.ParseAndClip` does this for the app.
+3. **Advance a pagination cursor with `lastTs.AddTicks(1)` — it preserves `Kind=Utc`.**
+   `new DateTime(lastTs.Ticks + 1)` **DROPS the Kind** → every chunk re-reads ~1–2 h → duplicate,
+   non-monotonic output. (The app is correct; several throwaway tools were not.)
+4. **Never compare/mix `DateTime.Now` or picker values with API times** — .NET compares raw Ticks
+   and ignores `Kind`, so the result is silently off by 1–2 h. Use `DateTime.UtcNow` for anything
+   measured against sample times (live-edge clamp, scheduler window, presets).
+
 ## Data Queries
 
 ### Interpolated (last N samples over a window)

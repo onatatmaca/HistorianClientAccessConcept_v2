@@ -167,7 +167,35 @@ independently-collecting redundant servers (see `known-issues.md`, measured on G
       Backfill History gained a Duration column
 - [x] `SyncPlannerTests` (14 tests) + 16-check local harness; verified live on
       TEMP_02_WS (41% → 100%/100%, "In sync") and full 78-tag preview
-- [ ] Live write acceptance: run one real backfill + revert via the new planner
+- [x] Live write acceptance: verified 2026-07-16 — write → read → journal → revert round-trip
+      against TESTSV1PC2 in BOTH DST seasons (CET +1 and CEST +2), 22/22 checks, incl. delete
+      precision (revert one sample, the +10 s neighbour survives). Closes the revert path, which
+      had never been live-verified.
+
+---
+
+## Phase 11 — UTC/local frame fix (2026-07-16)
+Root-caused after ~1 h of Secondary data was destroyed by an external helper tool (NOT the app —
+its deletes are journal-driven; see `known-issues.md`). The audit then exposed a real bug class.
+
+- [x] **Proven live**: the ClientAccess API frame is **UTC** (returned `Kind=Utc`; a live tag's
+      newest sample equals `UtcNow`, not `Now`), and the **`DateTimeKind` of a query start** shifts
+      the query by the UTC offset (Local/Unspecified: −59.2 min in Feb, −110.8 min in May)
+- [x] **`HistorianDataService.ToApi()/FromApi()`** — one boundary; the API frame stops at the
+      service and the rest of the app works in LOCAL time (query bounds, returned times, writes,
+      deletes, ReadRaw, ReadInterpolated). Chunk loop stays UTC; `cursor = lastTs.AddTicks(1)`
+      preserves Kind (never `new DateTime(ticks+1)`, which drops it and re-reads 1–2 h per chunk)
+- [x] Fixed **by construction**: dead live-edge guard (Phase 9's fix had been inert in any non-UTC
+      timezone), scheduler no-op at ≤2 h windows, empty "Last 1h" preset, the 1–2 h window shift
+      (first hour silently dropped), phantom trailing gray band in coverage
+- [x] Reads `ThrowOnItemErrors` (an errored read must never look like "no data"); verified live an
+      empty window and a nonexistent tag both return `ItemErrors=0`. `LiveEdgeGraceSeconds` now `> 0`
+- [x] Journal frame deliberately unchanged (UTC ticks) → legacy + new entries revert identically,
+      no migration. **Do not convert journal ticks to local** — old reverts would delete real data
+- [x] Verified live: app now returns `00:00:50=50.8, 00:01:00=51.1 …` **identical to Historian
+      Administrator's Trend**; previously `00:00:40=51.3` (raw UTC)
+- [ ] Run the MSTest suite in Visual Studio (can't run headless here — MSTest ref unresolvable)
+- [ ] Revert read-back: report *confirmed* not *requested* deletions (`MainForm.cs:1693`) — fails safe
 
 ---
 
