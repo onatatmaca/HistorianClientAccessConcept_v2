@@ -376,11 +376,14 @@ namespace HistorianSyncTool.Forms
                 SetShown(btnCompare,    _advanced);
                 SetShown(btnSyncScroll, _advanced);
 
-                // Actions: one guarded restore in the simple view, the full set in Advanced.
-                SetShown(btnRestore,         !_advanced);
+                // The guarded restore + undo history are always available (right panel).
+                // The per-direction copies and the two-direction preview are Advanced extras
+                // and sit in the action column next to the tables.
                 SetShown(btnCopyToPrimary,   _advanced);
                 SetShown(btnCopyToSecondary, _advanced);
                 SetShown(btnBackfillPreview, _advanced);
+                SetShown(pnlBackfillGroup,   _advanced);
+                SetShown(hdrBackfill,        _advanced);
                 SizeActionGroups();
 
                 // Quality reads "OK / uncertain / bad" in the simple view and as a percentage
@@ -587,7 +590,8 @@ namespace HistorianSyncTool.Forms
 
             if (toMirror == 0 && toMain == 0)
             {
-                lblGapSummary.Text      = Loc.T("missing.inSync");
+                // Wording matters here: this panel is next to the FULL list, not one point.
+                lblGapSummary.Text      = Loc.T("missing.inSyncAll");
                 lblGapSummary.ForeColor = AppTheme.Success;
             }
             else
@@ -668,6 +672,13 @@ namespace HistorianSyncTool.Forms
             DateTime from = dtpStart.Value;
             DateTime to   = dtpEnd.Value;
             if (from >= to) return;
+
+            // Picking a point in the sidebar (Advanced) is a request to look at THAT point.
+            // Without this the analysis would run while the all-points list is on screen and
+            // replace the list's totals with one point's numbers.
+            if (!_showingDetail && !string.IsNullOrWhiteSpace(_pointPrimary))
+                ShowDetailCard(_pointPrimary);
+
             await RunGapAnalysis(from, to);
         }
 

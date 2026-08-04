@@ -158,7 +158,7 @@ namespace HistorianSyncTool.Forms
             _grid.AlternatingRowsDefaultCellStyle.BackColor = AppTheme.RowAlt;
 
             _grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "", Name = "Sel",     FillWeight = 6 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Tag",           Name = "Tag",       FillWeight = 30, ReadOnly = true });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("grid.point"), Name = "Tag",       FillWeight = 30, ReadOnly = true });
             _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.source"), Name = "Src",      FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
             _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.target"), Name = "Tgt",      FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
             _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.willCopy"), Name = "Missing",  FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });

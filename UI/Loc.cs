@@ -170,6 +170,8 @@ namespace HistorianSyncTool.UI
                                               "{0} Messwert(e) fehlen auf dem Spiegelserver\nund {1} auf dem Hauptserver." } },
             { "missing.summaryEst",   new[] { "About {0} reading(s) missing on the mirror\nand {1} on the main server (estimate).",
                                               "Etwa {0} Messwert(e) fehlen auf dem Spiegelserver\nund {1} auf dem Hauptserver (Schätzung)." } },
+            { "missing.inSyncAll",    new[] { "In sync — every measurement point\nholds the same data on both servers.",
+                                              "Synchron — jede Messstelle hat auf beiden\nServern dieselben Daten." } },
             { "missing.clickHint",    new[] { "Click a row to zoom the timeline to it.",
                                               "Auf eine Zeile klicken, um die Zeitleiste darauf zu zoomen." } },
             { "grid.point",           new[] { "Point",                                   "Messstelle" } },
@@ -416,6 +418,17 @@ namespace HistorianSyncTool.UI
 
             // ── Result report ─────────────────────────────────────────────────────
             { "rep.title",            new[] { "Restore report",                    "Wiederherstellungs-Bericht" } },
+            { "rep.bothDirections",   new[] { "both directions",                   "beide Richtungen" } },
+            // The batch/attempt figures stay: they are real detail the team relies on when
+            // checking a run. Only the jargon nouns around them are gone.
+            { "rep.batchesOk",        new[] { "{0} of {1} batches succeeded",      "{0} von {1} Blöcken erfolgreich" } },
+            { "rep.timing",           new[] { "Started {0}   ·   finished {1}   ·   took {2}",
+                                              "Gestartet {0}   ·   beendet {1}   ·   Dauer {2}" } },
+            { "rep.ran",              new[] { "Run at {0}",                        "Lauf am {0}" } },
+            { "rep.totals",           new[] { "{0} reading(s) restored across {1} measurement point(s)   ·   {2} failed batch(es)   ·   {3} missing period(s) found",
+                                              "{0} Messwert(e) auf {1} Messstelle(n) wiederhergestellt   ·   {2} fehlgeschlagene(r) Block/Blöcke   ·   {3} fehlende(r) Zeitraum/Zeiträume gefunden" } },
+            { "rep.totalsShort",      new[] { "{0} reading(s) restored across {1} measurement point(s)",
+                                              "{0} Messwert(e) auf {1} Messstelle(n) wiederhergestellt" } },
             { "rep.col.point",        new[] { "Point",                             "Messstelle" } },
             { "rep.col.readings",     new[] { "Readings restored",                 "Wiederhergestellte Messwerte" } },
             { "rep.col.errors",       new[] { "Problems",                          "Probleme" } },

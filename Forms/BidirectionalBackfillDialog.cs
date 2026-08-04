@@ -222,7 +222,7 @@ namespace HistorianSyncTool.Forms
             g.AlternatingRowsDefaultCellStyle.BackColor = AppTheme.RowAlt;
 
             g.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "", Name = "Sel", FillWeight = 8 });
-            g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Tag",       Name = "Tag",     FillWeight = 42, ReadOnly = true });
+            g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("grid.point"), Name = "Tag",     FillWeight = 42, ReadOnly = true });
             g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.willCopy"), Name = "Missing", FillWeight = 16, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
             g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.range"), Name = "Range",   FillWeight = 34, ReadOnly = true });
             return g;

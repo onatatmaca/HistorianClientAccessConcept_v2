@@ -55,7 +55,9 @@ namespace HistorianSyncTool.Forms
             DateTime completed = _reports.Max(r => r.CompletedAt);
             TimeSpan wallClock = completed > started ? completed - started : TimeSpan.Zero;
 
-            Text            = _multi ? "Sync Report — both directions" : "Sync Report";
+            Text            = _multi
+                ? Loc.T("rep.title") + " — " + Loc.T("rep.bothDirections")
+                : Loc.T("rep.title");
             Size            = new Size(940, 560);
             MinimumSize     = new Size(720, 420);
             StartPosition   = FormStartPosition.CenterParent;
@@ -66,12 +68,12 @@ namespace HistorianSyncTool.Forms
             Font            = AppTheme.Default;
 
             // ── Header ────────────────────────────────────────────────────────────
-            string route = _multi
-                ? string.Join("   +   ", _reports.Select(r => $"{r.SourceServer}→{r.TargetServer}"))
-                : $"{_reports[0].SourceServer ?? "?"} → {_reports[0].TargetServer ?? "?"}";
+            string route = string.Join("   +   ", _reports.Select(r =>
+                Services.ServerNaming.RoleTitle(r.SourceServer) + " → " +
+                Services.ServerNaming.Role(r.TargetServer)));
 
             string titleExtra = !_samplesOnly && totalAttempted > 0
-                ? $"   ·   {totalSucceeded}/{totalAttempted} batches succeeded"
+                ? "   ·   " + Loc.F("rep.batchesOk", totalSucceeded, totalAttempted)
                 : "";
             var lblTitle = new Label
             {
@@ -85,10 +87,9 @@ namespace HistorianSyncTool.Forms
             var lblTiming = new Label
             {
                 Text = wallClock > TimeSpan.Zero
-                    ? $"Started: {started:yyyy-MM-dd HH:mm:ss}   ·   " +
-                      $"Finished: {completed:yyyy-MM-dd HH:mm:ss}   ·   " +
-                      $"Duration: {FormatDuration(wallClock)}"
-                    : $"Run: {started:yyyy-MM-dd HH:mm:ss}",
+                    ? Loc.F("rep.timing", started.ToString("yyyy-MM-dd HH:mm:ss"),
+                            completed.ToString("yyyy-MM-dd HH:mm:ss"), FormatDuration(wallClock))
+                    : Loc.F("rep.ran", started.ToString("yyyy-MM-dd HH:mm:ss")),
                 Dock = DockStyle.Top, Height = 20,
                 Padding = new Padding(16, 0, 16, 2),
                 Font = AppTheme.Default, ForeColor = AppTheme.TextSecondary
@@ -97,11 +98,9 @@ namespace HistorianSyncTool.Forms
             var lblTotals = new Label
             {
                 Text = _samplesOnly
-                    ? $"Samples written: {totalSamples:N0}   ·   Tags: {tagCount}"
-                    : $"Gaps found: {gapsFound}   ·   " +
-                      $"Samples written: {totalSamples:N0}   ·   " +
-                      $"Failed batches: {totalFailed}   ·   " +
-                      $"Tags processed: {tagCount}",
+                    ? Loc.F("rep.totalsShort", totalSamples.ToString("N0"), tagCount)
+                    : Loc.F("rep.totals", totalSamples.ToString("N0"), tagCount,
+                            totalFailed, gapsFound),
                 Dock = DockStyle.Top, Height = 22,
                 Padding = new Padding(16, 0, 16, 8),
                 Font = AppTheme.Default, ForeColor = AppTheme.TextPrimary

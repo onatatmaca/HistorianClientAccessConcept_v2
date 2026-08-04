@@ -524,8 +524,36 @@ namespace HistorianSyncTool.Forms
             SetupGapGrid();
             pnlGridWrap.Controls.Add(gridGaps);
 
-            // Assemble right panel (add Fill first, then Top items bottom-to-top)
-            pnlRightContent.Controls.Add(pnlGridWrap);     // Fill — last
+            // The one write action lives HERE, next to the numbers that justify it, because
+            // this panel is visible on BOTH centre cards. It used to sit in the action column
+            // between the two data tables — which only exists in the single-point view, so the
+            // all-points screen could report thousands of missing readings with no way to act.
+            btnRestore = new FlatButton
+            {
+                Text = "", ButtonStyle = FlatButtonStyle.Info,
+                Dock = DockStyle.Top, Height = 44, Font = AppTheme.Bold
+            };
+            btnRestore.Click += btnBackfillPreview_Click;   // same preview-then-confirm flow
+
+            btnHistory = new FlatButton
+            {
+                Text = "", ButtonStyle = FlatButtonStyle.Secondary,
+                Dock = DockStyle.Top, Height = 30, Font = AppTheme.SectionLabel
+            };
+            btnHistory.Click += btnHistory_Click;
+
+            var pnlRightActions = new Panel
+            {
+                Dock = DockStyle.Bottom, Height = 44 + 6 + 30 + 8,
+                BackColor = AppTheme.Surface, Padding = new Padding(rpad, 0, rpad, 8)
+            };
+            pnlRightActions.Controls.Add(btnHistory);
+            pnlRightActions.Controls.Add(MakeSpacer(6));
+            pnlRightActions.Controls.Add(btnRestore);
+
+            // Assemble right panel (add Fill first, then edge-docked items)
+            pnlRightContent.Controls.Add(pnlGridWrap);     // Fill — added first
+            pnlRightContent.Controls.Add(pnlRightActions); // Bottom
             pnlRightContent.Controls.Add(pnlSummary);      // Top — after header
             pnlRightContent.Controls.Add(hdrGapAnalysis);  // Top — first
             pnlRight.Controls.Add(pnlRightContent);        // Fill
@@ -685,29 +713,21 @@ namespace HistorianSyncTool.Forms
             pnlBackfillGroup = new Panel { Dock = DockStyle.Bottom, BackColor = AppTheme.Background };
             hdrBackfill      = new SectionHeader { Text = "", Dock = DockStyle.Top, Height = 20 };
 
-            btnHistory         = MakeStackedButton("", FlatButtonStyle.Secondary);
+            // Advanced extras only — the primary restore action and the undo history live in
+            // the right panel so they are reachable from both centre cards.
             btnBackfillPreview = MakeStackedButton("", FlatButtonStyle.Info);
             btnCopyToSecondary = MakeStackedButton("", FlatButtonStyle.Warning);
             btnCopyToPrimary   = MakeStackedButton("", FlatButtonStyle.Warning);
-            btnRestore         = MakeStackedButton("", FlatButtonStyle.Info);
-            btnRestore.Height  = 44;   // the one action in the simple view — give it weight
 
-            btnHistory.Click         += btnHistory_Click;
             btnBackfillPreview.Click += btnBackfillPreview_Click;
             btnCopyToSecondary.Click += btnCopyToSecondary_Click;
             btnCopyToPrimary.Click   += btnCopyToPrimary_Click;
-            btnRestore.Click         += btnBackfillPreview_Click;   // same guarded flow
 
-            // Added first = bottom-most. History sits at the bottom of the group,
-            // visually separated from the copy/restore actions.
-            pnlBackfillGroup.Controls.Add(btnHistory);
-            pnlBackfillGroup.Controls.Add(MakeSpacer(8));
             pnlBackfillGroup.Controls.Add(btnBackfillPreview);
             pnlBackfillGroup.Controls.Add(MakeSpacer(4, btnCopyToSecondary));
             pnlBackfillGroup.Controls.Add(btnCopyToSecondary);
             pnlBackfillGroup.Controls.Add(MakeSpacer(4, btnCopyToPrimary));
             pnlBackfillGroup.Controls.Add(btnCopyToPrimary);
-            pnlBackfillGroup.Controls.Add(btnRestore);
             pnlBackfillGroup.Controls.Add(MakeSpacer(6));
             pnlBackfillGroup.Controls.Add(hdrBackfill);
 
