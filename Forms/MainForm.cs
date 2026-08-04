@@ -22,6 +22,84 @@ namespace HistorianSyncTool.Forms
         private readonly HistorianDataService       _data;
         private readonly GapAnalysisService         _gapAnalysis = new GapAnalysisService();
 
+        // ── View mode ──────────────────────────────────────────────────────────────
+        // Simple is the product; Advanced only ADDS the technical surface (data tables,
+        // activity log, filters, per-direction copies, batch counters). Nothing is
+        // deleted, so anything used during an acceptance test is one click away.
+        private bool _advanced;
+        private bool _applyingViewState;   // guards the Advanced checkbox event during setup
+
+        /// <summary>
+        /// Controls the view mode has hidden.
+        ///
+        /// We cannot ask a control: <c>Control.Visible</c> returns EFFECTIVE visibility, which
+        /// is false for every child while the form itself has not been shown yet. Reading it
+        /// during construction made the layout helpers treat everything as hidden — an empty
+        /// sidebar section and a zero-height action column. So the intent is tracked here.
+        /// </summary>
+        private readonly HashSet<Control> _hiddenByViewMode = new HashSet<Control>();
+
+        private void SetShown(Control c, bool shown)
+        {
+            c.Visible = shown;
+            if (shown) _hiddenByViewMode.Remove(c);
+            else       _hiddenByViewMode.Add(c);
+        }
+
+        /// <summary>Desired visibility, independent of whether the form is on screen yet.</summary>
+        private bool IsShown(Control c) => c != null && !_hiddenByViewMode.Contains(c);
+
+        /// <summary>
+        /// The tag mask to browse with. The filter box only exists in Advanced, so the simple
+        /// view must fall back to "*" — otherwise a mask saved during an earlier Advanced
+        /// session (e.g. "STAT6.T*") would silently hide most measurement points from a user
+        /// who has no control to clear it.
+        /// </summary>
+        private string EffectiveMask()
+        {
+            if (!_advanced) return "*";
+            return string.IsNullOrWhiteSpace(txtTagnameFilter.Text) ? "*" : txtTagnameFilter.Text.Trim();
+        }
+
+        // ── Selected measurement point — explicit app state ────────────────────────
+        // The combo boxes are an INPUT DEVICE, not the source of truth. A hidden combo (the
+        // simple view hides the mirror selector) has no window handle, and then neither
+        // ComboBox.Text nor ComboBox.SelectedItem reports the bound selection — Text comes
+        // back empty. That is not just a cosmetic label problem: an empty point name makes
+        // RunGapAnalysis fall back to the configured HistSync heartbeat tag, so the app would
+        // analyse — and offer to repair — a different point than the one shown on screen.
+        // Everything therefore reads these two fields, which are set whenever the selection
+        // changes, whatever changed it.
+        private string _pointPrimary   = "";
+        private string _pointSecondary = "";
+
+        /// <summary>Reads the point name off a combo the user can actually see/type in.</summary>
+        private static string PointName(ComboBox combo)
+        {
+            if (combo == null) return "";
+
+            // Typed text wins while the combo is really on screen — Advanced users type to
+            // filter, and the typed name may not be the bound item yet.
+            if (combo.IsHandleCreated && !string.IsNullOrWhiteSpace(combo.Text))
+                return combo.Text.Trim();
+
+            var tag = combo.SelectedItem as Tag;
+            if (tag != null && !string.IsNullOrWhiteSpace(tag.Name)) return tag.Name;
+            if (combo.SelectedItem != null)
+            {
+                string s = combo.SelectedItem.ToString();
+                if (!string.IsNullOrWhiteSpace(s)) return s;
+            }
+            return combo.Text ?? "";
+        }
+
+        /// <summary>True once an analysis has produced a summary, so re-applying the
+        /// language doesn't overwrite a live result with the "connect first" prompt.</summary>
+        private bool _hasAnalysis;
+
+        /// <summary>Offline demo session (<c>--demo</c>) — no server is ever contacted.</summary>
+        private readonly bool _demoMode;
+
         // ── Gap Analysis state ─────────────────────────────────────────────────────
         private GapAnalysisResult _lastPrimaryResult;
         private GapAnalysisResult _lastSecondaryResult;
@@ -115,18 +193,54 @@ namespace HistorianSyncTool.Forms
         // ── Constructor ────────────────────────────────────────────────────────────
         public MainForm()
         {
+            // Language must be resolved BEFORE InitializeComponent — the designer's
+            // ApplyTexts() runs at the end of it.
+            Loc.Language = Loc.Parse(Settings.Default.Language);
+            _demoMode    = Program.DemoMode;
+
             InitializeComponent();
 
             int maxRetries;
             string retryStr = ConfigurationManager.AppSettings["MaxRetryAttempts"];
             maxRetries = int.TryParse(retryStr, out maxRetries) ? maxRetries : 3;
-            _data = new HistorianDataService(maxRetries);
+
+            if (_demoMode)
+            {
+                // Offline demo: two in-memory servers. EnableDemoMode creates the two
+                // sentinel connections WITHOUT connecting, and DemoDataService never calls
+                // its base class, so no server can be reached even by accident.
+                _connections.EnableDemoMode("DEMO-MAIN", "DEMO-MIRROR");
+                _data = new DemoDataService(_connections.Primary);
+            }
+            else
+            {
+                _data = new HistorianDataService(maxRetries);
+            }
 
             ApplyTheme();
             SetupVirtualMode();
             LoadSettings();
             UpdateConnectionStatus();
             UpdateTitleBar();
+
+            // View mode + language wiring (after the controls exist and settings are loaded)
+            _advanced = Settings.Default.AdvancedMode;
+            _applyingViewState = true;
+            chkAdvanced.Checked = _advanced;
+            _applyingViewState = false;
+            ApplyViewMode();
+            ApplyLanguage();
+
+            if (_demoMode)
+            {
+                pnlDemoBanner.Visible = true;
+                var demo = (DemoDataService)_data;
+                dtpStart.Value = demo.SuggestedFrom;
+                dtpEnd.Value   = demo.SuggestedTo;
+                txtPrimary.Text   = "DEMO-MAIN";
+                txtSecondary.Text = "DEMO-MIRROR";
+                UpdateConnectionStatus();
+            }
 
             _actionButtons = new List<Control>
             {
@@ -162,20 +276,184 @@ namespace HistorianSyncTool.Forms
             ApplyScheduleSettings();
             UpdateScheduleStatusLabel();
 
-            // If "run on startup" is enabled and we land already connected (rare on cold
-            // start but possible after reconnect), trigger a one-shot run after the form
-            // has a chance to load. Otherwise it waits for the user to Connect.
-            if (Settings.Default.ScheduleEnabled && Settings.Default.ScheduleRunOnStartup)
-                BeginInvoke((Action)(async () => { await TryRunScheduledOnStartup(); }));
         }
 
+        /// <summary>
+        /// One-shot scheduled run right after startup.
+        ///
+        /// ⚠ This path used to be unreachable: it requires both servers to be connected, and
+        /// before auto-connect existed that was never true on a cold start. Auto-connect makes
+        /// it live, so a "run on startup" flag someone ticked long ago would suddenly perform
+        /// an unattended write to a production historian. It is therefore confirmed once,
+        /// explicitly, and the answer is remembered.
+        /// </summary>
         private async Task TryRunScheduledOnStartup()
         {
-            await Task.Delay(2000); // let the form finish painting before we kick a run
-            if (_isBusy) return;
+            if (_isBusy || _demoMode) return;
+            if (!Settings.Default.ScheduleEnabled || !Settings.Default.ScheduleRunOnStartup) return;
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected) return;
+
+            if (!Settings.Default.ScheduleStartupConfirmed)
+            {
+                var ok = MessageBox.Show(this,
+                    "This tool is set to run an automatic repair immediately after startup.\n\n" +
+                    "It would copy missing readings between the two servers without asking again.\n\n" +
+                    "Start automatic repairs on startup from now on?",
+                    "Automatic repair on startup",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (ok != DialogResult.Yes)
+                {
+                    Settings.Default.ScheduleRunOnStartup = false;
+                    Settings.Default.Save();
+                    ScheduleLogger.Append("Startup run declined by the user — 'run on startup' switched off.");
+                    return;
+                }
+                Settings.Default.ScheduleStartupConfirmed = true;
+                Settings.Default.Save();
+            }
+
+            ScheduleLogger.Append("Startup run triggered after automatic connect.");
+            Log("Automatic repair on startup is enabled — starting a scheduled run.");
             try { await _schedule.TriggerNowAsync(); }
             catch (Exception ex) { ScheduleLogger.Append($"Startup-run failed: {ex.Message}"); }
+        }
+
+        // ── View mode (simple / advanced) ──────────────────────────────────────────
+
+        private void chkAdvanced_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_applyingViewState) return;
+            _advanced = chkAdvanced.Checked;
+            Settings.Default.AdvancedMode = _advanced;
+            Settings.Default.Save();
+            ApplyViewMode();
+        }
+
+        /// <summary>
+        /// Shows or hides the technical surface. Nothing here changes behaviour — only what
+        /// is on screen. Anything hidden must keep a working default (the tag filter falls
+        /// back to "*", the tag link is forced on) so hiding a control can never orphan the
+        /// logic that reads it.
+        /// </summary>
+        private void ApplyViewMode()
+        {
+            SuspendLayout();
+            try
+            {
+                // Sidebar: filter + statistics + the second point selector are technical.
+                SetShown(lblTagnameFilter, _advanced);
+                SetShown(txtTagnameFilter, _advanced);
+                SetShown(btnGetStats,      _advanced);
+                // Both buttons stay full width and stack: "Load measurement points" does not
+                // fit in half a sidebar and was rendering as "Load".
+                int lw = AppTheme.LeftPanelWidth - 2 - 16;
+                btnBrowseTags.Width = lw;
+                btnGetStats.Width   = lw;
+                btnGetStats.Left    = 0;                        // stacked, not side by side
+                btnGetStats.Top     = AppTheme.ButtonHeight + 4;
+                pnlTagButtons.Height = _advanced ? AppTheme.ButtonHeight * 2 + 4 : AppTheme.ButtonHeight;
+                SetShown(btnTagLink,      _advanced);
+                SetShown(lblSecondaryTag, _advanced);
+                SetShown(cboSecondary,    _advanced);
+
+                // In the simple view the two servers always show the SAME point — that is
+                // what "is my mirror complete?" means. Force the link on so the hidden
+                // secondary selector can never drift out of sync with the visible one.
+                if (!_advanced && !_tagLinkEnabled)
+                {
+                    _tagLinkEnabled = true;
+                    UpdateTagLinkVisual();
+                }
+
+                RelayoutTagsSection();
+
+                // Centre: the activity log and the row-by-row comparison are the technical view.
+                SetShown(pnlLog,        _advanced);
+                SetShown(btnCompare,    _advanced);
+                SetShown(btnSyncScroll, _advanced);
+
+                // Actions: one guarded restore in the simple view, the full set in Advanced.
+                SetShown(btnRestore,         !_advanced);
+                SetShown(btnCopyToPrimary,   _advanced);
+                SetShown(btnCopyToSecondary, _advanced);
+                SetShown(btnBackfillPreview, _advanced);
+                SizeActionGroups();
+
+                // Quality reads "OK / uncertain / bad" in the simple view and as a percentage
+                // in Advanced, so the loaded tables have to be re-rendered.
+                RebuildGridRowsForViewMode();
+            }
+            finally { ResumeLayout(true); }
+        }
+
+        /// <summary>Re-maps the loaded samples so the Quality column matches the view mode.</summary>
+        private void RebuildGridRowsForViewMode()
+        {
+            if (_isCompareMode) return;   // compare mode owns its own row building
+            if (_rawPrimarySamples != null)
+            {
+                _primaryRows = SamplesToGridRows(_rawPrimarySamples);
+                UpdateGridRowCount(gridPrimary, _primaryRows.Count);
+            }
+            if (_rawSecondarySamples != null)
+            {
+                _secondaryRows = SamplesToGridRows(_rawSecondarySamples);
+                UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
+            }
+        }
+
+        // ── Language ───────────────────────────────────────────────────────────────
+
+        private void SetLanguage(AppLanguage lang)
+        {
+            if (Loc.Language == lang) return;
+            Loc.Language = lang;
+            Settings.Default.Language = lang.ToString();
+            Settings.Default.Save();
+            ApplyLanguage();
+        }
+
+        /// <summary>
+        /// Re-applies every text after a language switch. ApplyTexts covers the static
+        /// labels; the updaters below re-render the values that depend on live state, so
+        /// nothing is left behind in the previous language.
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            ApplyTexts();
+            lnkLangEn.Font = Loc.Language == AppLanguage.En ? AppTheme.Bold : AppTheme.SectionLabel;
+            lnkLangDe.Font = Loc.Language == AppLanguage.De ? AppTheme.Bold : AppTheme.SectionLabel;
+            lnkLangEn.LinkColor = Loc.Language == AppLanguage.En ? Color.White : Color.FromArgb(205, 220, 238);
+            lnkLangDe.LinkColor = Loc.Language == AppLanguage.De ? Color.White : Color.FromArgb(205, 220, 238);
+
+            UpdateConnectionStatus();
+            UpdateTagLinkVisual();
+            UpdateScheduleStatusLabel();
+            UpdateHeaderServers();
+            UpdateGridHeaders();
+            if (!_hasAnalysis && string.IsNullOrEmpty(lblStatus.Text)) lblStatus.Text = Loc.T("status.ready");
+            PopulateDiffGrid();
+            RebuildGridRowsForViewMode();
+            timeline.Invalidate();
+
+            // The timeline track captions, the strip note and the status line are produced
+            // DURING an analysis, so they would keep the previous language until the next
+            // run. Re-run it once (only when a result is already on screen) so the whole
+            // window is in one language — switching is a rare, deliberate action.
+            if (_hasAnalysis && !_isBusy && dtpStart.Value < dtpEnd.Value)
+            {
+                var again = RunGapAnalysis(dtpStart.Value, dtpEnd.Value);
+                GC.KeepAlive(again);
+            }
+        }
+
+        /// <summary>"GENTHIN — main server   ↔   GENTHINPC2 — mirror" in the header strip.</summary>
+        private void UpdateHeaderServers()
+        {
+            string pri = ServerNaming.Display(ServerNaming.PrimaryLabel, txtPrimary.Text);
+            string sec = ServerNaming.Display(ServerNaming.SecondaryLabel, txtSecondary.Text);
+            lblHeaderServers.Text = pri + "     ↔     " + sec;
         }
 
         private async void GapAutoAnalyzeTimer_Tick(object sender, EventArgs e)
@@ -330,7 +608,7 @@ namespace HistorianSyncTool.Forms
         private void btnSyncScroll_Click(object sender, EventArgs e)
         {
             _scrollSyncEnabled = !_scrollSyncEnabled;
-            btnSyncScroll.Text = _scrollSyncEnabled ? "Unsync" : "Sync Scroll";
+            btnSyncScroll.Text = Loc.T(_scrollSyncEnabled ? "btn.unsyncScroll" : "btn.syncScroll");
         }
 
         // ── Settings ───────────────────────────────────────────────────────────────
@@ -381,6 +659,40 @@ namespace HistorianSyncTool.Forms
             if (Height > wa.Height) Height = wa.Height;
             if (Left + Width > wa.Right) Left = wa.Right - Width;
             if (Top + Height > wa.Bottom) Top = wa.Bottom - Height;
+
+            UpdateHeaderServers();
+            BeginInvoke((Action)(async () => { await StartupSequence(); }));
+        }
+
+        /// <summary>
+        /// Connect on startup so the app is useful without the user pressing anything,
+        /// then honour a configured startup repair run. A failed auto-connect is not an
+        /// error the user has to dismiss — the Connect button stays there.
+        /// </summary>
+        private async Task StartupSequence()
+        {
+            if (!_demoMode)
+            {
+                if (!Settings.Default.AutoConnectOnStartup) return;
+                if (string.IsNullOrWhiteSpace(txtPrimary.Text)) return;
+                await ConnectAsync();
+            }
+
+            // Connected (or in demo): load the points and show a result straight away, so the
+            // window is never a blank form. Phase 12b replaces this with the all-points
+            // overview; until then it opens on the first point.
+            if (_connections.IsPrimaryConnected)
+            {
+                await BrowseTagsAsync();
+                if (cboPrimary.Items.Count > 0)
+                {
+                    // Binding the DataSource already leaves index 0 selected, so assigning it
+                    // again raises no event — run the read + check chain explicitly.
+                    await ShowSelectedPoint();
+                }
+            }
+
+            await TryRunScheduledOnStartup();
         }
 
         // ── Title bar ──────────────────────────────────────────────────────────────
@@ -390,8 +702,9 @@ namespace HistorianSyncTool.Forms
             string sec = string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : txtSecondary.Text.Trim();
             bool bothConnected = _connections.IsPrimaryConnected && _connections.IsSecondaryConnected;
             Text = bothConnected
-                ? $"Historian Sync Tool  —  {pri}  ↔  {sec}"
-                : "Historian Sync Tool";
+                ? $"{Loc.T("app.title")}  —  {pri}  ↔  {sec}"
+                : Loc.T("app.title");
+            UpdateHeaderServers();
         }
 
         // ── Status helpers ─────────────────────────────────────────────────────────
@@ -452,7 +765,9 @@ namespace HistorianSyncTool.Forms
         {
             if (InvokeRequired) { Invoke((Action)(() => SetProgress(current, total))); return; }
             if (total <= 0) return;
-            _progressDlg?.UpdateStep(current, total, $"Batch {current} / {total}");
+            // "Batch" is an internal chunking detail — the simple view shows plain progress.
+            _progressDlg?.UpdateStep(current, total,
+                _advanced ? Loc.F("prog.batch", current, total) : Loc.F("prog.step", current, total));
         }
 
         private void SetPhaseProgress(int current, int total, string label)
@@ -476,11 +791,12 @@ namespace HistorianSyncTool.Forms
             bool pri = _connections.IsPrimaryConnected;
             bool sec = _connections.IsSecondaryConnected;
 
-            lblPrimaryStatus.Text      = pri ? "Connected" : "Not connected";
+            lblPrimaryStatus.Text      = Loc.T(pri ? "conn.connected" : "conn.notConnected");
             lblPrimaryStatus.ForeColor = pri ? AppTheme.Success : AppTheme.TextSecondary;
             txtPrimary.BackColor       = pri ? Color.FromArgb(240, 255, 245) : SystemColors.Window;
 
-            lblSecondaryStatus.Text      = sec ? "Connected" : (string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : "Not connected");
+            lblSecondaryStatus.Text      = sec ? Loc.T("conn.connected")
+                : (string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : Loc.T("conn.notConnected"));
             lblSecondaryStatus.ForeColor = sec ? AppTheme.Success : AppTheme.TextSecondary;
             txtSecondary.BackColor       = sec ? Color.FromArgb(240, 255, 245) : SystemColors.Window;
 
@@ -491,9 +807,9 @@ namespace HistorianSyncTool.Forms
         private void SetConnecting()
         {
             if (InvokeRequired) { Invoke((Action)SetConnecting); return; }
-            lblPrimaryStatus.Text      = "Connecting…";
+            lblPrimaryStatus.Text      = Loc.T("conn.connecting");
             lblPrimaryStatus.ForeColor = AppTheme.Warning;
-            lblSecondaryStatus.Text    = string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : "Connecting…";
+            lblSecondaryStatus.Text    = string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : Loc.T("conn.connecting");
             lblSecondaryStatus.ForeColor = AppTheme.Warning;
             dotStatus.State = ConnectionState.Connecting;
         }
@@ -501,10 +817,10 @@ namespace HistorianSyncTool.Forms
         private void SetConnectionError()
         {
             if (InvokeRequired) { Invoke((Action)SetConnectionError); return; }
-            lblPrimaryStatus.Text      = "Connection failed";
+            lblPrimaryStatus.Text      = Loc.T("conn.failed");
             lblPrimaryStatus.ForeColor = AppTheme.Danger;
             txtPrimary.BackColor       = SystemColors.Window;
-            lblSecondaryStatus.Text    = string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : "Connection failed";
+            lblSecondaryStatus.Text    = string.IsNullOrWhiteSpace(txtSecondary.Text) ? "—" : Loc.T("conn.failed");
             lblSecondaryStatus.ForeColor = AppTheme.Danger;
             txtSecondary.BackColor     = SystemColors.Window;
             dotStatus.State = ConnectionState.Error;
@@ -528,15 +844,27 @@ namespace HistorianSyncTool.Forms
                 RawTime   = s.Time,
                 Timestamp = s.Time.ToString("yyyy-MM-dd HH:mm:ss"),
                 Value     = s.Value.ToString("G6"),
-                Quality   = $"{s.Quality:F1}%"
+                Quality   = QualityText(s.Quality)
             }).ToList();
+        }
+
+        /// <summary>
+        /// "Quality" means nothing to a plant technician as a percentage. The simple view
+        /// says OK / uncertain / bad; Advanced keeps the exact figure the API returned.
+        /// </summary>
+        private string QualityText(double percentGood)
+        {
+            if (_advanced) return percentGood.ToString("F1") + "%";
+            if (percentGood >= 100.0) return Loc.T("quality.good");
+            if (percentGood > 0)      return Loc.T("quality.uncertain");
+            return Loc.T("quality.bad");
         }
 
         private void ExitCompareMode()
         {
             if (!_isCompareMode) return;
             _isCompareMode = false;
-            btnCompare.Text = "Compare";
+            btnCompare.Text = Loc.T("btn.compare");
         }
 
         // ── Alignment algorithm ────────────────────────────────────────────────────
@@ -578,7 +906,7 @@ namespace HistorianSyncTool.Forms
                         RawTime   = pTime,
                         Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
                         Value     = priSamples[i].Value.ToString("G6"),
-                        Quality   = $"{priSamples[i].Quality:F1}%",
+                        Quality   = QualityText(priSamples[i].Quality),
                         IsMismatch = mismatch
                     });
                     secAligned.Add(new GridRow
@@ -586,7 +914,7 @@ namespace HistorianSyncTool.Forms
                         RawTime   = sTime,
                         Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
                         Value     = secSamples[j].Value.ToString("G6"),
-                        Quality   = $"{secSamples[j].Quality:F1}%",
+                        Quality   = QualityText(secSamples[j].Quality),
                         IsMismatch = mismatch
                     });
                     i++; j++;
@@ -599,7 +927,7 @@ namespace HistorianSyncTool.Forms
                         RawTime   = pTime,
                         Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
                         Value     = priSamples[i].Value.ToString("G6"),
-                        Quality   = $"{priSamples[i].Quality:F1}%",
+                        Quality   = QualityText(priSamples[i].Quality),
                         IsExtra   = true
                     });
                     secAligned.Add(new GridRow
@@ -624,7 +952,7 @@ namespace HistorianSyncTool.Forms
                         RawTime   = sTime,
                         Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
                         Value     = secSamples[j].Value.ToString("G6"),
-                        Quality   = $"{secSamples[j].Quality:F1}%",
+                        Quality   = QualityText(secSamples[j].Quality),
                         IsExtra   = true
                     });
                     j++;
@@ -638,7 +966,7 @@ namespace HistorianSyncTool.Forms
                 priAligned.Add(new GridRow
                 {
                     RawTime = pTime, Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                    Value = priSamples[i].Value.ToString("G6"), Quality = $"{priSamples[i].Quality:F1}%",
+                    Value = priSamples[i].Value.ToString("G6"), Quality = QualityText(priSamples[i].Quality),
                     IsExtra = true
                 });
                 secAligned.Add(new GridRow
@@ -661,7 +989,7 @@ namespace HistorianSyncTool.Forms
                 secAligned.Add(new GridRow
                 {
                     RawTime = sTime, Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                    Value = secSamples[j].Value.ToString("G6"), Quality = $"{secSamples[j].Quality:F1}%",
+                    Value = secSamples[j].Value.ToString("G6"), Quality = QualityText(secSamples[j].Quality),
                     IsExtra = true
                 });
                 j++;
@@ -674,12 +1002,19 @@ namespace HistorianSyncTool.Forms
         // ── Connection ─────────────────────────────────────────────────────────────
         private async void btnConnect_Click(object sender, EventArgs e)
         {
+            await ConnectAsync();
+        }
+
+        private async Task ConnectAsync()
+        {
+            if (_demoMode) return;   // demo sessions are "connected" from the start
+
             string pri = txtPrimary.Text.Trim();
             string sec = txtSecondary.Text.Trim();
-            if (string.IsNullOrWhiteSpace(pri)) { SetStatus("Enter primary server hostname.", true); return; }
+            if (string.IsNullOrWhiteSpace(pri)) { SetStatus(Loc.T("msg.enterHost"), true); return; }
 
-            SetBusy(true, "Connecting...");
-            SetStatus("Connecting to servers…");
+            SetBusy(true, Loc.T("prog.connecting"));
+            SetStatus(Loc.T("msg.connecting"));
             SetConnecting();
 
             try
@@ -693,17 +1028,19 @@ namespace HistorianSyncTool.Forms
                 }, _cts.Token);
 
                 UpdateConnectionStatus();
-                SetStatus($"Connected to {pri}" + (string.IsNullOrWhiteSpace(sec) ? "." : $" and {sec}."));
+                SetStatus(string.IsNullOrWhiteSpace(sec)
+                    ? Loc.F("msg.connectedTo", pri)
+                    : Loc.F("msg.connectedToBoth", pri, sec));
             }
             catch (OperationCanceledException)
             {
                 UpdateConnectionStatus();
-                SetStatus("Connection cancelled.");
+                SetStatus(Loc.T("msg.connectCancelled"));
             }
             catch (Exception ex)
             {
                 SetConnectionError();
-                SetStatus($"Connection failed: {ex.Message}", true);
+                SetStatus(Loc.F("msg.connectFailed", ex.Message), true);
             }
             finally { SetBusy(false); }
         }
@@ -711,12 +1048,17 @@ namespace HistorianSyncTool.Forms
         // ── Browse Tags ────────────────────────────────────────────────────────────
         private async void btnBrowseTags_Click(object sender, EventArgs e)
         {
+            await BrowseTagsAsync();
+        }
+
+        private async Task BrowseTagsAsync()
+        {
             if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected)
-            { SetStatus("Connect to a server first.", true); return; }
+            { SetStatus(Loc.T("msg.connectFirst"), true); return; }
 
             SetBusy(true);
-            SetStatus("Browsing tags…");
-            string mask = string.IsNullOrWhiteSpace(txtTagnameFilter.Text) ? "*" : txtTagnameFilter.Text.Trim();
+            SetStatus(Loc.T("msg.loadingPoints"));
+            string mask = EffectiveMask();
             bool priConn = _connections.IsPrimaryConnected;
             bool secConn = _connections.IsSecondaryConnected;
 
@@ -762,13 +1104,48 @@ namespace HistorianSyncTool.Forms
                 if (priTags != null) _browsedPrimaryTags   = priTags.Select(t => t.Name).ToArray();
                 if (secTags != null) _browsedSecondaryTags = secTags.Select(t => t.Name).ToArray();
 
+                // Binding a DataSource selects item 0 without raising SelectedIndexChanged for
+                // a control that has no handle yet, so seed the explicit selection here: keep
+                // the point the user was on if it survived the browse, otherwise take the first.
+                _pointPrimary   = PickPoint(_pointPrimary,   _browsedPrimaryTags);
+                _pointSecondary = PickPoint(_pointSecondary, _browsedSecondaryTags);
+                SyncCombo(cboPrimary,   _pointPrimary);
+                SyncCombo(cboSecondary, _pointSecondary);
+
                 int p = priTags?.Length ?? 0;
                 int s = secTags?.Length ?? 0;
-                SetStatus($"Tags loaded — Primary: {p}, Secondary: {s}");
+                SetStatus(Loc.F("msg.pointsLoaded", p, s));
             }
-            catch (OperationCanceledException) { SetStatus("Browse cancelled."); }
-            catch (Exception ex) { SetStatus($"Browse failed: {ex.Message}", true); }
+            catch (OperationCanceledException) { SetStatus(Loc.T("msg.browseCancelled")); }
+            catch (Exception ex) { SetStatus(Loc.F("msg.browseFailed", ex.Message), true); }
             finally { SetBusy(false); }
+        }
+
+        /// <summary>Keeps the current point if the browse still contains it, else takes the first.</summary>
+        private static string PickPoint(string current, string[] available)
+        {
+            if (available == null || available.Length == 0) return "";
+            if (!string.IsNullOrWhiteSpace(current) &&
+                available.Any(n => string.Equals(n, current, StringComparison.OrdinalIgnoreCase)))
+                return current;
+            return available[0];
+        }
+
+        /// <summary>Moves a combo onto <paramref name="point"/> without raising the auto-read chain.</summary>
+        private void SyncCombo(ComboBox combo, string point)
+        {
+            if (combo == null || string.IsNullOrWhiteSpace(point)) return;
+            for (int i = 0; i < combo.Items.Count; i++)
+            {
+                var t = combo.Items[i] as Tag;
+                string name = t != null ? t.Name : combo.Items[i]?.ToString();
+                if (!string.Equals(name, point, StringComparison.OrdinalIgnoreCase)) continue;
+
+                _suppressAutoRead = true;
+                try { combo.SelectedIndex = i; combo.Text = point; }
+                finally { _suppressAutoRead = false; }
+                return;
+            }
         }
 
         /// <summary>
@@ -786,11 +1163,11 @@ namespace HistorianSyncTool.Forms
         private async void btnGetStats_Click(object sender, EventArgs e)
         {
             if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected)
-            { SetStatus("Connect to a server first.", true); return; }
+            { SetStatus(Loc.T("msg.connectFirst"), true); return; }
 
             SetBusy(true);
-            SetStatus("Fetching server stats…");
-            string mask = string.IsNullOrWhiteSpace(txtTagnameFilter.Text) ? "*" : txtTagnameFilter.Text.Trim();
+            SetStatus(Loc.T("msg.statsLoading"));
+            string mask = EffectiveMask();
             string priHost = txtPrimary.Text.Trim();
             string secHost = txtSecondary.Text.Trim();
             bool priConn = _connections.IsPrimaryConnected;
@@ -817,18 +1194,18 @@ namespace HistorianSyncTool.Forms
                 if (secConn)
                     Log($"Secondary ({secHost}): {secCount} float tag(s) matching '{mask}'");
 
-                SetStatus("Server stats loaded — see Activity Log.");
+                SetStatus(Loc.T("msg.statsLoaded"));
             }
-            catch (OperationCanceledException) { SetStatus("Stats cancelled."); }
-            catch (Exception ex) { SetStatus($"Stats failed: {ex.Message}", true); }
+            catch (OperationCanceledException) { SetStatus(Loc.T("msg.browseCancelled")); }
+            catch (Exception ex) { SetStatus(Loc.F("msg.statsFailed", ex.Message), true); }
             finally { SetBusy(false); }
         }
 
         // ── Read Data ──────────────────────────────────────────────────────────────
         private async void btnReadPrimary_Click(object sender, EventArgs e)
         {
-            if (!_connections.IsPrimaryConnected) { SetStatus("Primary not connected.", true); return; }
-            if (string.IsNullOrWhiteSpace(cboPrimary.Text)) { SetStatus("Select a primary tag.", true); return; }
+            if (!_connections.IsPrimaryConnected) { SetStatus(Loc.T("msg.notConnectedMain"), true); return; }
+            if (string.IsNullOrWhiteSpace(_pointPrimary)) { SetStatus(Loc.T("msg.selectPoint"), true); return; }
             await ReadPrimaryData();
         }
 
@@ -836,19 +1213,21 @@ namespace HistorianSyncTool.Forms
         {
             if (_suppressAutoRead || _isBusy) return;
             if (!_connections.IsPrimaryConnected) return;
-            if (string.IsNullOrWhiteSpace(cboPrimary.Text)) return;
+
+            _pointPrimary = PointName(cboPrimary);   // the user just changed it
+            if (string.IsNullOrWhiteSpace(_pointPrimary)) return;
 
             // Linked mode: auto-select the identical tag on the secondary side too
             bool mirrored = _tagLinkEnabled && !_isLinkPropagating
                 && TryMirrorTagSelection(cboPrimary, cboSecondary);
 
-            lblGridPrimaryTag.Text = $"{txtPrimary.Text.Trim()} — {cboPrimary.Text}";
+            UpdateGridHeaders();
             await ReadPrimaryData();
 
             if (mirrored && _connections.IsSecondaryConnected
-                && !string.IsNullOrWhiteSpace(cboSecondary.Text))
+                && !string.IsNullOrWhiteSpace(_pointSecondary))
             {
-                lblGridSecondaryTag.Text = $"{txtSecondary.Text.Trim()} — {cboSecondary.Text}";
+                UpdateGridHeaders();
                 await ReadSecondaryData();
             }
 
@@ -861,13 +1240,13 @@ namespace HistorianSyncTool.Forms
         {
             DateTime from = dtpStart.Value;
             DateTime to   = dtpEnd.Value;
-            if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+            if (from >= to) { SetStatus(Loc.T("msg.dateOrder"), true); return; }
 
-            string tag     = cboPrimary.Text;
+            string tag     = _pointPrimary;
             string priHost = txtPrimary.Text.Trim();
 
             SetBusy(true);
-            SetStatus("Reading primary data…");
+            SetStatus(Loc.T("msg.readingMain"));
             ExitCompareMode();
 
             try
@@ -880,18 +1259,18 @@ namespace HistorianSyncTool.Forms
                 _rawPrimarySamples = samples;
                 _primaryRows = SamplesToGridRows(samples);
                 UpdateGridRowCount(gridPrimary, _primaryRows.Count);
-                lblGridPrimaryTag.Text = $"{priHost} — {tag}";
-                SetStatus($"Primary: {samples.Count} raw samples read for '{tag}'.");
+                UpdateGridHeaders();
+                SetStatus(Loc.F("msg.readMain", samples.Count.ToString("N0"), tag));
             }
-            catch (OperationCanceledException) { SetStatus("Read cancelled."); }
-            catch (Exception ex) { SetStatus($"Read failed: {ex.Message}", true); }
+            catch (OperationCanceledException) { SetStatus(Loc.T("msg.readCancelled")); }
+            catch (Exception ex) { SetStatus(Loc.F("msg.readFailed", ex.Message), true); }
             finally { SetBusy(false); }
         }
 
         private async void btnReadSecondary_Click(object sender, EventArgs e)
         {
-            if (!_connections.IsSecondaryConnected) { SetStatus("Secondary not connected.", true); return; }
-            if (string.IsNullOrWhiteSpace(cboSecondary.Text)) { SetStatus("Select a secondary tag.", true); return; }
+            if (!_connections.IsSecondaryConnected) { SetStatus(Loc.T("msg.notConnectedMirror"), true); return; }
+            if (string.IsNullOrWhiteSpace(_pointSecondary)) { SetStatus(Loc.T("msg.selectPoint"), true); return; }
             await ReadSecondaryData();
         }
 
@@ -899,18 +1278,20 @@ namespace HistorianSyncTool.Forms
         {
             if (_suppressAutoRead || _isBusy) return;
             if (!_connections.IsSecondaryConnected) return;
-            if (string.IsNullOrWhiteSpace(cboSecondary.Text)) return;
+
+            _pointSecondary = PointName(cboSecondary);   // the user just changed it
+            if (string.IsNullOrWhiteSpace(_pointSecondary)) return;
 
             bool mirrored = _tagLinkEnabled && !_isLinkPropagating
                 && TryMirrorTagSelection(cboSecondary, cboPrimary);
 
-            lblGridSecondaryTag.Text = $"{txtSecondary.Text.Trim()} — {cboSecondary.Text}";
+            UpdateGridHeaders();
             await ReadSecondaryData();
 
             if (mirrored && _connections.IsPrimaryConnected
-                && !string.IsNullOrWhiteSpace(cboPrimary.Text))
+                && !string.IsNullOrWhiteSpace(_pointPrimary))
             {
-                lblGridPrimaryTag.Text = $"{txtPrimary.Text.Trim()} — {cboPrimary.Text}";
+                UpdateGridHeaders();
                 await ReadPrimaryData();
             }
 
@@ -926,9 +1307,10 @@ namespace HistorianSyncTool.Forms
         /// </summary>
         private bool TryMirrorTagSelection(ComboBox changed, ComboBox other)
         {
-            string name = changed.Text;
+            string name = changed == cboPrimary ? _pointPrimary : _pointSecondary;
             if (string.IsNullOrWhiteSpace(name)) return false;
-            if (string.Equals(other.Text, name, StringComparison.OrdinalIgnoreCase)) return false;
+            string otherName = other == cboPrimary ? _pointPrimary : _pointSecondary;
+            if (string.Equals(otherName, name, StringComparison.OrdinalIgnoreCase)) return false;
 
             int match = -1;
             for (int i = 0; i < other.Items.Count; i++)
@@ -941,7 +1323,7 @@ namespace HistorianSyncTool.Forms
             if (match < 0)
             {
                 if (other.Items.Count > 0)
-                    SetStatus($"'{name}' does not exist on the other server — tags not linked for this selection.");
+                    SetStatus(Loc.F("msg.notOnOther", name));
                 return false;
             }
 
@@ -949,6 +1331,9 @@ namespace HistorianSyncTool.Forms
             _suppressAutoRead = true;
             try { other.SelectedIndex = match; }
             finally { _suppressAutoRead = false; _isLinkPropagating = false; }
+
+            // Record the selection explicitly: a hidden combo will not report it back.
+            if (other == cboPrimary) _pointPrimary = name; else _pointSecondary = name;
             return true;
         }
 
@@ -962,13 +1347,60 @@ namespace HistorianSyncTool.Forms
 
             // Turning the link ON re-aligns the secondary tag immediately so the UI
             // state matches what the button promises.
-            if (_tagLinkEnabled && !string.IsNullOrWhiteSpace(cboPrimary.Text)
+            if (_tagLinkEnabled && !string.IsNullOrWhiteSpace(_pointPrimary)
                 && TryMirrorTagSelection(cboPrimary, cboSecondary)
                 && _connections.IsSecondaryConnected)
             {
-                lblGridSecondaryTag.Text = $"{txtSecondary.Text.Trim()} — {cboSecondary.Text}";
+                UpdateGridHeaders();
                 var _ = ReadSecondaryThenReanalyze();
             }
+        }
+
+        /// <summary>
+        /// Loads both servers' data for the point currently selected and checks it, mirroring
+        /// the tag to the other side first when the link is on. Used on startup (where binding
+        /// the combo raises no SelectedIndexChanged) and anywhere the selection is set in code.
+        /// </summary>
+        private async Task ShowSelectedPoint()
+        {
+            if (string.IsNullOrWhiteSpace(_pointPrimary)) return;
+
+            if (_tagLinkEnabled) TryMirrorTagSelection(cboPrimary, cboSecondary);
+
+            if (_connections.IsPrimaryConnected)
+            {
+                UpdateGridHeaders();
+                await ReadPrimaryData();
+            }
+            if (_connections.IsSecondaryConnected && !string.IsNullOrWhiteSpace(_pointSecondary))
+            {
+                UpdateGridHeaders();
+                await ReadSecondaryData();
+            }
+
+            DateTime from = dtpStart.Value, to = dtpEnd.Value;
+            if (from < to) await RunGapAnalysis(from, to);
+        }
+
+        /// <summary>
+        /// Re-labels the two data tables from the current state ("HOST — point").
+        ///
+        /// Derived in ONE place instead of assigned at six call sites, and forced to repaint:
+        /// these labels were updated while a modal progress dialog covered the window and the
+        /// text change alone did not reach the screen, leaving a stale caption next to fresh
+        /// data. Refresh() paints now rather than whenever the next invalidation happens.
+        /// </summary>
+        private void UpdateGridHeaders()
+        {
+            if (InvokeRequired) { Invoke((Action)UpdateGridHeaders); return; }
+
+            // Just the point name: the button above already says which server this table is,
+            // and the header strip names both hosts. The old "HOST — point" caption did not
+            // fit the label and silently rendered as "HOST — " with the point name cut off.
+            lblGridPrimaryTag.Text   = _pointPrimary   ?? "";
+            lblGridSecondaryTag.Text = _pointSecondary ?? "";
+            lblGridPrimaryTag.Refresh();
+            lblGridSecondaryTag.Refresh();
         }
 
         private async Task ReadSecondaryThenReanalyze()
@@ -980,9 +1412,7 @@ namespace HistorianSyncTool.Forms
 
         private void UpdateTagLinkVisual()
         {
-            btnTagLink.Text = _tagLinkEnabled
-                ? "⇄  Linked — same tag on both servers"
-                : "✕  Not linked — tags chosen independently";
+            btnTagLink.Text = Loc.T(_tagLinkEnabled ? "btn.tagLink.on" : "btn.tagLink.off");
             btnTagLink.BackColor = _tagLinkEnabled ? AppTheme.NavyLight : AppTheme.Background;
             btnTagLink.ForeColor = _tagLinkEnabled ? AppTheme.Navy : AppTheme.TextSecondary;
         }
@@ -991,13 +1421,13 @@ namespace HistorianSyncTool.Forms
         {
             DateTime from = dtpStart.Value;
             DateTime to   = dtpEnd.Value;
-            if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+            if (from >= to) { SetStatus(Loc.T("msg.dateOrder"), true); return; }
 
-            string tag     = cboSecondary.Text;
+            string tag     = _pointSecondary;
             string secHost = txtSecondary.Text.Trim();
 
             SetBusy(true);
-            SetStatus("Reading secondary data…");
+            SetStatus(Loc.T("msg.readingMirror"));
             ExitCompareMode();
 
             try
@@ -1010,11 +1440,11 @@ namespace HistorianSyncTool.Forms
                 _rawSecondarySamples = samples;
                 _secondaryRows = SamplesToGridRows(samples);
                 UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
-                lblGridSecondaryTag.Text = $"{secHost} — {tag}";
-                SetStatus($"Secondary: {samples.Count} raw samples read for '{tag}'.");
+                UpdateGridHeaders();
+                SetStatus(Loc.F("msg.readMirror", samples.Count.ToString("N0"), tag));
             }
-            catch (OperationCanceledException) { SetStatus("Read cancelled."); }
-            catch (Exception ex) { SetStatus($"Read failed: {ex.Message}", true); }
+            catch (OperationCanceledException) { SetStatus(Loc.T("msg.readCancelled")); }
+            catch (Exception ex) { SetStatus(Loc.F("msg.readFailed", ex.Message), true); }
             finally { SetBusy(false); }
         }
 
@@ -1025,7 +1455,7 @@ namespace HistorianSyncTool.Forms
             if (_isCompareMode)
             {
                 _isCompareMode = false;
-                btnCompare.Text = "Compare";
+                btnCompare.Text = Loc.T("btn.compare");
                 if (_rawPrimarySamples != null)
                 {
                     _primaryRows = SamplesToGridRows(_rawPrimarySamples);
@@ -1036,28 +1466,28 @@ namespace HistorianSyncTool.Forms
                     _secondaryRows = SamplesToGridRows(_rawSecondarySamples);
                     UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
                 }
-                SetStatus("Switched to raw view.");
+                SetStatus(Loc.T("msg.plainList"));
                 return;
             }
 
             // Need both servers
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
-            { SetStatus("Connect to both servers first.", true); return; }
+            { SetStatus(Loc.T("msg.connectBothFirst"), true); return; }
 
-            string priTag = cboPrimary.Text;
-            string secTag = cboSecondary.Text;
+            string priTag = _pointPrimary;
+            string secTag = _pointSecondary;
             if (string.IsNullOrWhiteSpace(priTag) || string.IsNullOrWhiteSpace(secTag))
-            { SetStatus("Select tags on both servers first.", true); return; }
+            { SetStatus(Loc.T("msg.comparePoints"), true); return; }
 
             DateTime from = dtpStart.Value;
             DateTime to   = dtpEnd.Value;
-            if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+            if (from >= to) { SetStatus(Loc.T("msg.dateOrder"), true); return; }
 
             string priHost = txtPrimary.Text.Trim();
             string secHost = txtSecondary.Text.Trim();
 
             SetBusy(true);
-            SetStatus("Reading and comparing…");
+            SetStatus(Loc.T("msg.comparing"));
 
             try
             {
@@ -1084,21 +1514,21 @@ namespace HistorianSyncTool.Forms
                 UpdateGridRowCount(gridPrimary,   _primaryRows.Count);
                 UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
 
-                lblGridPrimaryTag.Text   = $"{priHost} — {priTag}";
-                lblGridSecondaryTag.Text = $"{secHost} — {secTag}";
+                UpdateGridHeaders();
 
                 _isCompareMode = true;
-                btnCompare.Text = "Raw View";
+                btnCompare.Text = Loc.T("btn.rawView");
 
                 // Summary
                 int matched   = _primaryRows.Count(r => !r.IsSpacer && !r.IsExtra);
                 int priOnly   = _primaryRows.Count(r => r.IsExtra);
                 int secOnly   = _secondaryRows.Count(r => r.IsExtra);
                 int mismatches = _primaryRows.Count(r => r.IsMismatch);
-                SetStatus($"Compare: Pri {priSamples.Count} | Sec {secSamples.Count} | Matched {matched} | Pri-only {priOnly} | Sec-only {secOnly} | Mismatches {mismatches}");
+                SetStatus(Loc.F("msg.compareSummary", priSamples.Count, secSamples.Count,
+                    matched, priOnly, secOnly, mismatches));
             }
-            catch (OperationCanceledException) { SetStatus("Compare cancelled."); }
-            catch (Exception ex) { SetStatus($"Compare failed: {ex.Message}", true); }
+            catch (OperationCanceledException) { SetStatus(Loc.T("msg.compareCancelled")); }
+            catch (Exception ex) { SetStatus(Loc.F("msg.compareFailed", ex.Message), true); }
             finally { SetBusy(false); }
         }
 
@@ -1111,7 +1541,7 @@ namespace HistorianSyncTool.Forms
         {
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
             {
-                SetStatus("Both servers must be connected for backfill.", true);
+                SetStatus(Loc.T("msg.needBoth"), true);
                 return null;
             }
 
@@ -1151,7 +1581,7 @@ namespace HistorianSyncTool.Forms
         /// </summary>
         private List<string> TryGetSharedTags()
         {
-            SetStatus("Loading shared tags…");
+            SetStatus(Loc.T("msg.loadingShared"));
             try
             {
                 var priTags = _data.BrowseTags(_connections.Primary, "*").Select(t => t.Name).ToList();
@@ -1159,15 +1589,15 @@ namespace HistorianSyncTool.Forms
                 var shared  = priTags.Intersect(secTags).OrderBy(n => n).ToList();
                 if (shared.Count == 0)
                 {
-                    SetStatus("No tags found on both servers.", true);
+                    SetStatus(Loc.T("msg.noShared"), true);
                     return null;
                 }
-                SetStatus($"{shared.Count} tag(s) exist on both servers.");
+                SetStatus(Loc.F("msg.sharedCount", shared.Count));
                 return shared;
             }
             catch (Exception ex)
             {
-                SetStatus($"Failed to load tags: {ex.Message}", true);
+                SetStatus(Loc.F("msg.sharedFailed", ex.Message), true);
                 return null;
             }
         }
@@ -1178,7 +1608,7 @@ namespace HistorianSyncTool.Forms
             // numbers match exactly what ExecuteBackfill will write.
             DateTime from = dtpStart.Value;
             DateTime to   = ClampLiveEdge(dtpEnd.Value);
-            if (from >= to) { SetStatus("Invalid evaluation range.", true); return; }
+            if (from >= to) { SetStatus(Loc.T("msg.rangeInvalid"), true); return; }
 
             var tags = ShowTagSelectionDialog(_lastSecondaryResult, "Primary", "Secondary", from, to);
             if (tags == null) return;
@@ -1194,7 +1624,7 @@ namespace HistorianSyncTool.Forms
         {
             DateTime from = dtpStart.Value;
             DateTime to   = ClampLiveEdge(dtpEnd.Value);
-            if (from >= to) { SetStatus("Invalid evaluation range.", true); return; }
+            if (from >= to) { SetStatus(Loc.T("msg.rangeInvalid"), true); return; }
 
             var tags = ShowTagSelectionDialog(_lastPrimaryResult, "Secondary", "Primary", from, to);
             if (tags == null) return;
@@ -1216,11 +1646,11 @@ namespace HistorianSyncTool.Forms
         private async void btnBackfillPreview_Click(object sender, EventArgs e)
         {
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
-            { SetStatus("Both servers must be connected for backfill.", true); return; }
+            { SetStatus(Loc.T("msg.needBoth"), true); return; }
 
             DateTime from = dtpStart.Value;
             DateTime to   = ClampLiveEdge(dtpEnd.Value);
-            if (from >= to) { SetStatus("Invalid evaluation range.", true); return; }
+            if (from >= to) { SetStatus(Loc.T("msg.rangeInvalid"), true); return; }
 
             var sharedTags = TryGetSharedTags();
             if (sharedTags == null) return;
@@ -1321,7 +1751,7 @@ namespace HistorianSyncTool.Forms
                 Log($"Evaluation end moved to {evalTo:yyyy-MM-dd HH:mm:ss} — the last " +
                     $"{LiveEdgeGrace.TotalSeconds:F0}s are excluded (collectors may still be writing).");
             }
-            if (evalFrom >= evalTo) { SetStatus("Invalid evaluation range.", true); return null; }
+            if (evalFrom >= evalTo) { SetStatus(Loc.T("msg.rangeInvalid"), true); return null; }
 
             TimeSpan batchSize = _gapAnalysis.BatchSize;
 
@@ -1337,7 +1767,7 @@ namespace HistorianSyncTool.Forms
             // run can be reverted later (delete exactly these). Populated in the worker.
             var writtenTicks = new Dictionary<string, List<long>>();
 
-            SetBusy(true, $"Backfilling {targetLabel}…");
+            SetBusy(true, Loc.F("prog.restoring", ServerNaming.Short(targetLabel, targetHost)));
             var report = new SyncRunReport
             {
                 StartedAt    = DateTime.Now,
@@ -1525,7 +1955,10 @@ namespace HistorianSyncTool.Forms
 
                 report.CompletedAt = DateTime.Now;
                 LogRunReport(report);
-                SetStatus($"Backfill complete: {report.BatchesSucceeded}/{report.BatchesAttempted} batches across {totalTags} tag(s), {report.SamplesWritten} samples written.");
+                SetStatus(_advanced
+                    ? Loc.F("msg.restoreDoneAdv", report.BatchesSucceeded, report.BatchesAttempted,
+                            totalTags, report.SamplesWritten.ToString("N0"))
+                    : Loc.F("msg.restoreDone", report.SamplesWritten.ToString("N0")));
             }
             catch (OperationCanceledException)
             {
@@ -1533,14 +1966,14 @@ namespace HistorianSyncTool.Forms
                 report.CompletedAt = DateTime.Now;
                 report.Errors.Add("Operation cancelled by user.");
                 LogRunReport(report);
-                SetStatus("Backfill cancelled.");
+                SetStatus(Loc.T("msg.restoreCancelled"));
             }
             catch (Exception ex)
             {
                 report.CompletedAt = DateTime.Now;
                 report.Errors.Add($"Fatal: {ex.Message}");
                 LogRunReport(report);
-                SetStatus($"Backfill failed: {ex.Message}", true);
+                SetStatus(Loc.F("msg.restoreFailed", ex.Message), true);
             }
             finally { SetBusy(false); }
 
@@ -1580,13 +2013,9 @@ namespace HistorianSyncTool.Forms
             if (wasCancelled && !unattended && journal != null)
             {
                 var keep = MessageBox.Show(this,
-                    $"The backfill was cancelled.\n\n" +
-                    $"{journal.TotalSamples:N0} sample(s) had already been copied to {targetLabel} " +
-                    $"({targetHost}) before the stop.\n\n" +
-                    "Keep the copied data?\n\n" +
-                    "Yes  –  keep it (you can still revert later via Backfill History)\n" +
-                    "No   –  revert now: delete exactly those samples again",
-                    "Keep the data copied so far?",
+                    Loc.F("cancel.body", journal.TotalSamples.ToString("N0"),
+                          ServerNaming.Short(targetLabel, targetHost)),
+                    Loc.T("cancel.title"),
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question,
                     MessageBoxDefaultButton.Button1);
                 if (keep == DialogResult.No)
@@ -1660,11 +2089,11 @@ namespace HistorianSyncTool.Forms
 
             if (targetConn == null)
             {
-                SetStatus($"Connect to {entry.TargetHost} before reverting that run.", true);
+                SetStatus(Loc.F("msg.undoConnect", entry.TargetHost), true);
                 return;
             }
 
-            SetBusy(true, "Reverting backfill…");
+            SetBusy(true, Loc.T("prog.undoing"));
             int totalDeleted = 0, errorCount = 0;
             try
             {
@@ -1688,7 +2117,7 @@ namespace HistorianSyncTool.Forms
                         Invoke((Action)(() =>
                         {
                             Log($"Revert {idx + 1}/{tags.Count}: {t.TagName} — deleting {times.Count} sample(s)");
-                            SetStatus($"Reverting {idx + 1}/{tags.Count}: {t.TagName}…");
+                            SetStatus(Loc.F("msg.undoRunning", idx + 1, tags.Count, t.TagName));
                             SetProgress(idx + 1, tags.Count);
                         }));
 
@@ -1711,15 +2140,16 @@ namespace HistorianSyncTool.Forms
                     entry.Reverted = true;
                     entry.RevertedLocal = DateTime.Now;
                     BackfillJournalService.Save(entry);
-                    SetStatus($"Revert complete — deleted {totalDeleted} sample(s) from {entry.TargetLabel}.");
+                    SetStatus(Loc.F("msg.undoDone", totalDeleted.ToString("N0"),
+                        ServerNaming.Short(entry.TargetLabel, entry.TargetHost)));
                 }
                 else
                 {
-                    SetStatus($"Revert finished with {errorCount} error(s); {totalDeleted} sample(s) deleted. Run kept Active for retry.", true);
+                    SetStatus(Loc.F("msg.undoErrors", errorCount, totalDeleted.ToString("N0")), true);
                 }
             }
-            catch (OperationCanceledException) { SetStatus("Revert cancelled — partial deletion may have occurred."); }
-            catch (Exception ex) { SetStatus($"Revert failed: {ex.Message}", true); }
+            catch (OperationCanceledException) { SetStatus(Loc.T("msg.undoCancelled")); }
+            catch (Exception ex) { SetStatus(Loc.F("msg.undoFailed", ex.Message), true); }
             finally { SetBusy(false); }
 
             // Reflect the deletion in the coverage bars and loaded grids.
@@ -1743,14 +2173,14 @@ namespace HistorianSyncTool.Forms
 
             if (_schedule == null || !_schedule.Enabled)
             {
-                lblSchedule.Text      = "Schedule: off";
+                lblSchedule.Text      = Loc.T("status.schedule.off");
                 lblSchedule.ForeColor = AppTheme.TextSecondary;
                 return;
             }
 
             if (_schedule.RunInProgress)
             {
-                lblSchedule.Text      = "Schedule: running…";
+                lblSchedule.Text      = Loc.T("status.schedule.running");
                 lblSchedule.ForeColor = AppTheme.Teal;
                 return;
             }
@@ -1758,7 +2188,7 @@ namespace HistorianSyncTool.Forms
             var next = _schedule.NextRunLocal;
             if (next == DateTime.MaxValue)
             {
-                lblSchedule.Text      = "Schedule: pending";
+                lblSchedule.Text      = Loc.T("status.schedule.pending");
                 lblSchedule.ForeColor = AppTheme.TextSecondary;
                 return;
             }
@@ -1767,7 +2197,7 @@ namespace HistorianSyncTool.Forms
             string nextText = next.Date == DateTime.Today
                 ? next.ToString("HH:mm")
                 : next.ToString("MM-dd HH:mm");
-            lblSchedule.Text      = $"Next run: {nextText}";
+            lblSchedule.Text      = Loc.F("status.schedule.next", nextText);
             lblSchedule.ForeColor = AppTheme.Navy;
         }
 
@@ -1962,11 +2392,11 @@ namespace HistorianSyncTool.Forms
         private async void btnAnalyzeGaps_Click(object sender, EventArgs e)
         {
             if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected)
-            { SetStatus("Connect to at least one server first.", true); return; }
+            { SetStatus(Loc.T("msg.connectFirst"), true); return; }
 
             DateTime from = dtpStart.Value;
             DateTime to   = dtpEnd.Value;
-            if (from >= to) { SetStatus("Start date must be before end date.", true); return; }
+            if (from >= to) { SetStatus(Loc.T("msg.dateOrder"), true); return; }
 
             await RunGapAnalysis(from, to);
             // Explicit analyze click → also refresh any loaded data tables for the new range
@@ -1986,12 +2416,12 @@ namespace HistorianSyncTool.Forms
             bool secHadData = _secondaryRows != null && _secondaryRows.Count > 0;
 
             if (priHadData && _connections.IsPrimaryConnected
-                && !string.IsNullOrWhiteSpace(cboPrimary.Text))
+                && !string.IsNullOrWhiteSpace(_pointPrimary))
             {
                 await ReadPrimaryData();
             }
             if (secHadData && _connections.IsSecondaryConnected
-                && !string.IsNullOrWhiteSpace(cboSecondary.Text))
+                && !string.IsNullOrWhiteSpace(_pointSecondary))
             {
                 await ReadSecondaryData();
             }
@@ -2012,8 +2442,8 @@ namespace HistorianSyncTool.Forms
             if (string.IsNullOrWhiteSpace(fallback)) fallback = "HistSync";
 
             // Per-side tag: user selection if present, else HistSync fallback
-            string priTag = string.IsNullOrWhiteSpace(cboPrimary.Text)   ? fallback : cboPrimary.Text;
-            string secTag = string.IsNullOrWhiteSpace(cboSecondary.Text) ? fallback : cboSecondary.Text;
+            string priTag = string.IsNullOrWhiteSpace(_pointPrimary)   ? fallback : _pointPrimary;
+            string secTag = string.IsNullOrWhiteSpace(_pointSecondary) ? fallback : _pointSecondary;
 
             // Capture UI values before Task.Run
             string priHost = txtPrimary.Text.Trim();
@@ -2021,8 +2451,8 @@ namespace HistorianSyncTool.Forms
 
             SetBusy(true);
             SetStatus(priTag == secTag
-                ? $"Analyzing gaps for '{priTag}'…"
-                : $"Analyzing gaps — Primary '{priTag}', Secondary '{secTag}'…");
+                ? Loc.F("msg.checking", priTag)
+                : Loc.F("msg.checkingTwo", priTag, secTag));
             _lastPrimaryResult   = null;
             _lastSecondaryResult = null;
 
@@ -2138,13 +2568,12 @@ namespace HistorianSyncTool.Forms
                         copyable.AddRange(SegmentsFromPlan(planToSec, toSecondary: true));
                         copyable.AddRange(SegmentsFromPlan(planToPri, toSecondary: false));
                         if (!planToSec.UsedExactDiff || !planToPri.UsedExactDiff)
-                            stripNote = "outage-fill mode — collectors log independently " +
-                                        $"(timestamps match {planToSec.MatchRate:P0}); only real outages are copied";
+                            stripNote = Loc.F("timeline.strip.independent", planToSec.MatchRate.ToString("P0"));
                     }
                     else if (priTag != secTag)
-                        stripNote = "different tags selected — copy strip hidden (see table)";
+                        stripNote = Loc.T("timeline.strip.differentTags");
                     else
-                        stripNote = "connect both servers to see copy candidates";
+                        stripNote = Loc.T("timeline.strip.connect");
 
                     // Blue "backfilled by this tool" bands from the revert journal
                     priBack = LoadBackfilledRanges(priHost, priTag, from, to);
@@ -2161,10 +2590,10 @@ namespace HistorianSyncTool.Forms
 
                 int totalGaps = (_lastPrimaryResult?.Gaps.Count ?? 0)
                               + (_lastSecondaryResult?.Gaps.Count ?? 0);
-                SetStatus($"Gap analysis complete — {totalGaps} gap(s) found.");
+                SetStatus(Loc.F("msg.checkDone", totalGaps));
             }
-            catch (OperationCanceledException) { SetStatus("Analysis cancelled."); }
-            catch (Exception ex) { SetStatus($"Analysis failed: {ex.Message}", true); }
+            catch (OperationCanceledException) { SetStatus(Loc.T("msg.checkCancelled")); }
+            catch (Exception ex) { SetStatus(Loc.F("msg.checkFailed", ex.Message), true); }
             finally { SetBusy(false); }
         }
 
@@ -2197,7 +2626,7 @@ namespace HistorianSyncTool.Forms
             DateTime to   = dtpEnd.Value;
             if (from >= to) return;
 
-            Log("Auto-refreshing gap analysis after backfill…");
+            SetStatus(Loc.T("msg.refreshing"));
             await RunGapAnalysis(from, to);
             await RefreshLoadedGrids();
         }
@@ -2213,15 +2642,16 @@ namespace HistorianSyncTool.Forms
 
             int toSecondary = _lastDiffRows.Where(r =>  r.ToSecondary).Sum(r => r.Count);
             int toPrimary   = _lastDiffRows.Where(r => !r.ToSecondary).Sum(r => r.Count);
+            _hasAnalysis = true;
             if (toSecondary == 0 && toPrimary == 0)
             {
-                lblGapSummary.Text      = "In sync — a backfill would copy\nnothing for the selected tag(s).";
+                lblGapSummary.Text      = Loc.T("missing.inSync");
                 lblGapSummary.ForeColor = AppTheme.Success;
             }
             else
             {
-                lblGapSummary.Text      = $"Backfill would copy {toSecondary:N0} sample(s) → Secondary\n" +
-                                          $"and {toPrimary:N0} sample(s) → Primary";
+                lblGapSummary.Text      = Loc.F("missing.summary",
+                                              toSecondary.ToString("N0"), toPrimary.ToString("N0"));
                 lblGapSummary.ForeColor = AppTheme.Danger;
             }
         }
@@ -2231,25 +2661,32 @@ namespace HistorianSyncTool.Forms
             bool feasibilityKnown, List<TimeRange> fillable, List<TimeRange> unfillable,
             List<TimeRange> backfilled)
         {
+            // sideLabel is the INTERNAL role ("Primary"/"Secondary"); everything the user
+            // sees goes through ServerNaming.
+            string who = ServerNaming.Display(sideLabel, host);
+
             if (result == null)
             {
                 return new TimelineTrackData
                 {
-                    Label = string.IsNullOrWhiteSpace(host) ? sideLabel : $"{sideLabel} · {host}",
+                    Label = who,
                     CoverageRatio = -1,
-                    EmptyText = string.IsNullOrWhiteSpace(host) ? "not connected" : "not analyzed"
+                    EmptyText = Loc.T(string.IsNullOrWhiteSpace(host)
+                        ? "timeline.notConnected" : "timeline.notAnalyzed")
                 };
             }
 
             string tag = result.TagName ?? "(tag)";
-            // The gap rule is shown right on the track so "why is/isn't this red" is
-            // never a black box (derived from THIS tag's own sampling cadence).
-            string rule = result.HasData && result.GapThreshold > TimeSpan.Zero
-                ? $"   ·   gap rule: silence > {FormatDuration(result.GapThreshold)}"
+            // The rule behind "is this a gap?" is shown on the track in Advanced, so the
+            // colours are never a black box. In the simple view it is noise — the tooltip
+            // on the segment still explains what the colour means.
+            string rule = _advanced && result.HasData && result.GapThreshold > TimeSpan.Zero
+                ? Loc.F("timeline.rule", FormatDuration(result.GapThreshold))
                 : "";
             return new TimelineTrackData
             {
-                Label            = $"{sideLabel} · {host} · {tag}" + (result.HasData ? rule : "  (no data)"),
+                Label            = $"{who} · {tag}" + (result.HasData ? rule : "  (" + Loc.T("timeline.noData") + ")"),
+                TooltipName      = ServerNaming.Short(sideLabel, host),
                 CoverageRatio    = result.HasData ? result.CoverageRatio : 0.0,
                 HasData          = result.HasData,
                 FeasibilityKnown = feasibilityKnown,
@@ -2289,7 +2726,13 @@ namespace HistorianSyncTool.Forms
                         if (!string.Equals(t.TagName, tag, StringComparison.OrdinalIgnoreCase)) continue;
                         foreach (var tk in t.Ticks)
                         {
-                            var dt = new DateTime(tk);
+                            // Journal ticks are UTC (deliberately — see architecture.md), while
+                            // `from`/`to` and the timeline axis are LOCAL. Reading them with a
+                            // plain `new DateTime(tk)` produced Kind=Unspecified and compared raw
+                            // ticks, so the blue "restored by this tool" band was drawn 1-2 h off
+                            // (and clipped against the wrong window edges). Convert, exactly like
+                            // RevertBackfill does when it hands them back to the data service.
+                            var dt = new DateTime(tk, DateTimeKind.Utc).ToLocalTime();
                             if (dt >= from && dt <= to) ticks.Add(dt);
                         }
                     }
@@ -2342,9 +2785,16 @@ namespace HistorianSyncTool.Forms
         private void PopulateDiffGrid()
         {
             gridGaps.Rows.Clear();
+            string priHost = txtPrimary.Text.Trim();
+            string secHost = txtSecondary.Text.Trim();
             foreach (var r in _lastDiffRows)
             {
-                string missingOn = r.ToSecondary ? "Secondary" : "Primary";
+                // ToSecondary == true means the MIRROR is the one lacking the readings.
+                string missingLabel = r.ToSecondary ? ServerNaming.SecondaryLabel : ServerNaming.PrimaryLabel;
+                string sourceLabel  = r.ToSecondary ? ServerNaming.PrimaryLabel   : ServerNaming.SecondaryLabel;
+                string missingOn    = ServerNaming.Short(missingLabel, r.ToSecondary ? secHost : priHost);
+                string source       = ServerNaming.Short(sourceLabel,  r.ToSecondary ? priHost : secHost);
+
                 string range = (r.First.HasValue && r.Last.HasValue)
                     ? $"{r.First.Value:MM-dd HH:mm} → {r.Last.Value:MM-dd HH:mm}"
                     : "—";
@@ -2354,12 +2804,10 @@ namespace HistorianSyncTool.Forms
 
                 // Columns are narrow in the right panel — a full plain-language sentence
                 // on hover explains exactly what the row means.
-                string source = r.ToSecondary ? "Primary" : "Secondary";
-                string full = $"A backfill would copy {r.Count:N0} sample(s) of '{r.Tag}' from {source} to {missingOn}.";
+                string full = Loc.F("grid.rowTip", r.Count.ToString("N0"), r.Tag, source, missingOn);
                 if (r.First.HasValue && r.Last.HasValue)
                     full += $"\n{r.First.Value:yyyy-MM-dd HH:mm:ss} → {r.Last.Value:yyyy-MM-dd HH:mm:ss}";
-                full += $"\n(Same rule the backfill uses — independent collector streams are not double-copied.)" +
-                        $"\nClick the row to zoom the timeline to this period.";
+                full += Loc.T("grid.rowTipRule");
                 foreach (DataGridViewCell cell in row.Cells)
                     cell.ToolTipText = full;
             }
@@ -2439,12 +2887,12 @@ namespace HistorianSyncTool.Forms
         private void btnExport_Click(object sender, EventArgs e)
         {
             if (_primaryRows.Count == 0 && _secondaryRows.Count == 0)
-            { SetStatus("No data to export — read some data first.", true); return; }
+            { SetStatus(Loc.T("msg.noExport"), true); return; }
 
             using (var dlg = new SaveFileDialog())
             {
                 dlg.Filter   = "CSV files (*.csv)|*.csv";
-                dlg.Title    = "Export Data to CSV";
+                dlg.Title    = Loc.T("msg.exportTitle");
                 dlg.FileName = "historian_export";
 
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
@@ -2469,11 +2917,11 @@ namespace HistorianSyncTool.Forms
                         count++;
                         Log($"Exported secondary data \u2192 {path}");
                     }
-                    SetStatus($"Exported {count} table(s) to CSV.");
+                    SetStatus(Loc.F("msg.exported", count));
                 }
                 catch (Exception ex)
                 {
-                    SetStatus($"Export failed: {ex.Message}", true);
+                    SetStatus(Loc.F("msg.exportFailed", ex.Message), true);
                 }
             }
         }

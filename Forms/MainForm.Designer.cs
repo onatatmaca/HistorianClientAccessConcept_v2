@@ -17,6 +17,16 @@ namespace HistorianSyncTool.Forms
 
         // ── Control declarations ───────────────────────────────────────────────────
 
+        // Header strip (app identity + which servers + language + Advanced)
+        private Panel          pnlHeader;
+        private Label          lblAppTitle;
+        private Label          lblHeaderServers;
+        private LinkLabel      lnkLangEn;
+        private LinkLabel      lnkLangDe;
+        private CheckBox       chkAdvanced;
+        private Panel          pnlDemoBanner;
+        private Label          lblDemoBanner;
+
         // Status bar
         private Panel          pnlStatusBar;
         private ConnectionDot  dotStatus;
@@ -104,6 +114,20 @@ namespace HistorianSyncTool.Forms
         private FlatButton     btnExport;
         private FlatButton     btnHistory;
 
+        /// <summary>Simple view's single write action — opens the same preview-then-confirm
+        /// flow as "Preview &amp; restore", so nothing is written without a confirmation.</summary>
+        private FlatButton     btnRestore;
+
+        // Group containers + headers (fields so Advanced mode can hide them and
+        // ApplyTexts can re-label them)
+        private Panel          pnlViewGroup;
+        private Panel          pnlBackfillGroup;
+        private SectionHeader  hdrView;
+        private SectionHeader  hdrBackfill;
+
+        /// <summary>Shared tooltip provider — all texts assigned in ApplyTexts.</summary>
+        private ToolTip        _tips;
+
         // ── InitializeComponent ────────────────────────────────────────────────────
         private void InitializeComponent()
         {
@@ -115,7 +139,7 @@ namespace HistorianSyncTool.Forms
             this.BackColor     = AppTheme.Background;
             this.AutoScaleMode = AutoScaleMode.Font;
             this.MinimumSize   = new Size(1000, 650);
-            this.Text          = "Historian Sync Tool";
+            this.Text          = Loc.T("app.title");
             this.StartPosition = FormStartPosition.CenterScreen;
             this.Padding       = new Padding(8, 4, 8, 0);  // symmetric breathing room around all panels
 
@@ -124,6 +148,80 @@ namespace HistorianSyncTool.Forms
             int formW  = System.Math.Min(1380, (int)(screen.Width  * 0.92));
             int formH  = System.Math.Min(820,  (int)(screen.Height * 0.92));
             this.Size  = new Size(formW, formH);
+
+            // ══════════════════════════════════════════════════════════════════════
+            // HEADER STRIP  (Dock=Top) — who am I, which servers, language, Advanced
+            // ══════════════════════════════════════════════════════════════════════
+            pnlHeader = new Panel
+            {
+                Dock      = DockStyle.Top,
+                Height    = 40,
+                BackColor = AppTheme.Navy,
+                Padding   = new Padding(12, 0, 8, 0)
+            };
+
+            lblAppTitle = new Label
+            {
+                Dock      = DockStyle.Left,
+                Width     = 210,
+                Font      = AppTheme.AppTitle,
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+
+            // "GENTHIN — main server   ↔   GENTHINPC2 — mirror". Filled by UpdateHeaderServers().
+            lblHeaderServers = new Label
+            {
+                Dock      = DockStyle.Fill,
+                Font      = AppTheme.Default,
+                ForeColor = Color.FromArgb(205, 220, 238),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding   = new Padding(14, 0, 0, 0)
+            };
+
+            // Advanced switch — the ONE control that reveals the technical surface.
+            chkAdvanced = new CheckBox
+            {
+                Dock       = DockStyle.Right,
+                Width      = 96,
+                Font       = AppTheme.Default,
+                ForeColor  = Color.White,
+                TextAlign  = ContentAlignment.MiddleLeft,
+                Cursor     = Cursors.Hand,
+                FlatStyle  = FlatStyle.Flat,
+                Padding    = new Padding(4, 0, 0, 0)
+            };
+            chkAdvanced.FlatAppearance.BorderSize = 0;
+            chkAdvanced.CheckedChanged += chkAdvanced_CheckedChanged;
+
+            lnkLangDe = MakeLangLink("DE");
+            lnkLangEn = MakeLangLink("EN");
+            lnkLangDe.Click += (s, e) => SetLanguage(AppLanguage.De);
+            lnkLangEn.Click += (s, e) => SetLanguage(AppLanguage.En);
+
+            // Dock=Right stacks right-to-left in add order: Advanced, then DE, then EN.
+            pnlHeader.Controls.Add(lblHeaderServers);  // Fill first
+            pnlHeader.Controls.Add(lblAppTitle);
+            pnlHeader.Controls.Add(chkAdvanced);
+            pnlHeader.Controls.Add(lnkLangDe);
+            pnlHeader.Controls.Add(lnkLangEn);
+
+            // ── Demo banner (only visible with --demo) ────────────────────────────
+            pnlDemoBanner = new Panel
+            {
+                Dock      = DockStyle.Top,
+                Height    = 24,
+                BackColor = AppTheme.Warning,
+                Visible   = false
+            };
+            lblDemoBanner = new Label
+            {
+                Dock      = DockStyle.Fill,
+                Font      = AppTheme.Bold,
+                ForeColor = Color.FromArgb(60, 40, 0),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            pnlDemoBanner.Controls.Add(lblDemoBanner);
 
             // ══════════════════════════════════════════════════════════════════════
             // STATUS BAR  (Dock=Bottom)
@@ -147,7 +245,7 @@ namespace HistorianSyncTool.Forms
 
             lblStatus = new Label
             {
-                Text      = "Ready",
+                Text      = "",
                 Left      = 34, Top = 0,
                 Width     = 600, Height = AppTheme.StatusBarHeight,
                 Font      = AppTheme.Default,
@@ -157,7 +255,7 @@ namespace HistorianSyncTool.Forms
 
             lblSchedule = new Label
             {
-                Text       = "Schedule: off",
+                Text       = "",
                 Dock       = DockStyle.Right,
                 Width      = 200,
                 Font       = AppTheme.Default,
@@ -200,11 +298,11 @@ namespace HistorianSyncTool.Forms
             int lw  = fw - pad * 2;
 
             // ── CONNECTION ─────────────────────────────────────────────────────────
-            hdrConnection = new SectionHeader { Text = "CONNECTION", Width = fw, Left = 0, Top = 0 };
+            hdrConnection = new SectionHeader { Text = "", Width = fw, Left = 0, Top = 0 };
 
             var pnlConnContent = new Panel { Left = 0, Top = hdrConnection.Bottom, Width = fw };
 
-            lblPrimary = MakeLabel("Primary server", lw, pad, 8);
+            lblPrimary = MakeLabel("", lw, pad, 8);
             txtPrimary = MakeTextBox(lw, pad, lblPrimary.Bottom + 2);
             lblPrimaryStatus = new Label
             {
@@ -214,7 +312,7 @@ namespace HistorianSyncTool.Forms
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary, AutoSize = false
             };
 
-            lblSecondary = MakeLabel("Secondary server", lw, pad, lblPrimaryStatus.Bottom + 6);
+            lblSecondary = MakeLabel("", lw, pad, lblPrimaryStatus.Bottom + 6);
             txtSecondary = MakeTextBox(lw, pad, lblSecondary.Bottom + 2);
             lblSecondaryStatus = new Label
             {
@@ -224,15 +322,12 @@ namespace HistorianSyncTool.Forms
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary, AutoSize = false
             };
 
-            btnConnect = MakeButton("Connect", lw, pad, lblSecondaryStatus.Bottom + 8);
+            btnConnect = MakeButton("", lw, pad, lblSecondaryStatus.Bottom + 8);
             btnConnect.Click += btnConnect_Click;
 
-            // Server fields accept "host", "host:port", "ip" or "ip:port"
-            var tipHosts = new ToolTip(components);
-            tipHosts.SetToolTip(txtPrimary,
-                "Hostname or IP address, optional port —\ne.g. GENTHIN, 192.168.50.186 or GENTHIN:14000");
-            tipHosts.SetToolTip(txtSecondary,
-                "Hostname or IP address, optional port —\ne.g. GENTHINPC2, 192.168.50.187 or GENTHINPC2:14000");
+            // Shared tooltip provider — texts are assigned in ApplyTexts so they follow
+            // the language switch. Server fields accept "host", "host:port", "ip", "ip:port".
+            _tips = new ToolTip(components) { AutoPopDelay = 12000, InitialDelay = 400 };
 
             pnlConnContent.Controls.AddRange(new Control[]
             {
@@ -245,15 +340,15 @@ namespace HistorianSyncTool.Forms
             // ── EVALUATION PERIOD (includes gap analysis mode radios) ──────────────
             hdrPeriod = new SectionHeader
             {
-                Text = "EVALUATION PERIOD", Width = fw, Left = 0,
+                Text = "", Width = fw, Left = 0,
                 Top  = hdrConnection.Bottom + pnlConnContent.Height
             };
 
             var pnlPeriodContent = new Panel { Left = 0, Top = hdrPeriod.Bottom, Width = fw };
 
-            lblStartDate = MakeLabel("Start date", lw, pad, 8);
+            lblStartDate = MakeLabel("", lw, pad, 8);
             dtpStart     = MakeDtp(lw, pad, lblStartDate.Bottom + 2);
-            lblEndDate   = MakeLabel("End date", lw, pad, dtpStart.Bottom + 6);
+            lblEndDate   = MakeLabel("", lw, pad, dtpStart.Bottom + 6);
             dtpEnd       = MakeDtp(lw, pad, lblEndDate.Bottom + 2);
 
             // Quick-select presets — 4x2 grid
@@ -287,7 +382,7 @@ namespace HistorianSyncTool.Forms
             pnlQuickDates.Controls.AddRange(new Control[]
                 { btnLast1h, btnLast6h, btnLast24h, btnLast3d, btnLast7d, btnLast30d, btnLast90d, btnLastYear });
 
-            btnAnalyzeGaps = MakeButton("Analyze Gaps", lw, pad, pnlQuickDates.Bottom + 8);
+            btnAnalyzeGaps = MakeButton("", lw, pad, pnlQuickDates.Bottom + 8);
             btnAnalyzeGaps.Click += btnAnalyzeGaps_Click;
 
             pnlPeriodContent.Controls.AddRange(new Control[]
@@ -301,21 +396,21 @@ namespace HistorianSyncTool.Forms
             // ── TAGS ──────────────────────────────────────────────────────────────
             hdrTags = new SectionHeader
             {
-                Text = "TAGS", Width = fw, Left = 0,
+                Text = "", Width = fw, Left = 0,
                 Top  = hdrPeriod.Bottom + pnlPeriodContent.Height
             };
 
             var pnlTagsContent = new Panel { Left = 0, Top = hdrTags.Bottom, Width = fw };
 
-            lblTagnameFilter = MakeLabel("Tagname filter", lw, pad, 8);
+            lblTagnameFilter = MakeLabel("", lw, pad, 8);
             txtTagnameFilter = MakeTextBox(lw, pad, lblTagnameFilter.Bottom + 2);
 
             pnlTagButtons = new Panel
             {
                 Left = pad, Top = txtTagnameFilter.Bottom + 6, Width = lw, Height = AppTheme.ButtonHeight
             };
-            btnBrowseTags = MakeButton("Browse Tags",  (lw - 4) / 2, 0, 0);
-            btnGetStats   = MakeButton("Server Stats", (lw - 4) / 2, btnBrowseTags.Right + 4, 0);
+            btnBrowseTags = MakeButton("",  (lw - 4) / 2, 0, 0);
+            btnGetStats   = MakeButton("", (lw - 4) / 2, btnBrowseTags.Right + 4, 0);
             btnBrowseTags.ButtonStyle = FlatButtonStyle.Secondary;
             btnGetStats.ButtonStyle   = FlatButtonStyle.Secondary;
             btnBrowseTags.Click += btnBrowseTags_Click;
@@ -323,7 +418,7 @@ namespace HistorianSyncTool.Forms
             pnlTagButtons.Controls.Add(btnBrowseTags);
             pnlTagButtons.Controls.Add(btnGetStats);
 
-            lblPrimaryTag   = MakeLabel("Primary tag",   lw, pad, pnlTagButtons.Bottom + 6);
+            lblPrimaryTag   = MakeLabel("",   lw, pad, pnlTagButtons.Bottom + 6);
             cboPrimary      = MakeCombo(lw, pad, lblPrimaryTag.Bottom + 2);
             cboPrimary.SelectedIndexChanged += cboPrimary_SelectedIndexChanged;
 
@@ -335,12 +430,12 @@ namespace HistorianSyncTool.Forms
                 FlatStyle = FlatStyle.Flat, Font = AppTheme.Small,
                 BackColor = AppTheme.NavyLight, ForeColor = AppTheme.Navy,
                 Cursor = Cursors.Hand, TextAlign = ContentAlignment.MiddleCenter,
-                Text = "⇄  Linked — same tag on both servers"
+                Text = ""
             };
             btnTagLink.FlatAppearance.BorderSize = 0;
             btnTagLink.Click += btnTagLink_Click;
 
-            lblSecondaryTag = MakeLabel("Secondary tag", lw, pad, btnTagLink.Bottom + 5);
+            lblSecondaryTag = MakeLabel("", lw, pad, btnTagLink.Bottom + 5);
             cboSecondary    = MakeCombo(lw, pad, lblSecondaryTag.Bottom + 2);
             cboSecondary.SelectedIndexChanged += cboSecondary_SelectedIndexChanged;
 
@@ -376,7 +471,7 @@ namespace HistorianSyncTool.Forms
 
             // The coverage bars moved to the full-width SYNC TIMELINE in the center —
             // this panel now holds only the per-direction summary + the missing-data table.
-            hdrGapAnalysis = new SectionHeader { Text = "MISSING DATA", Dock = DockStyle.Top };
+            hdrGapAnalysis = new SectionHeader { Text = "", Dock = DockStyle.Top };
 
             var pnlSummary = new Panel
             {
@@ -385,13 +480,13 @@ namespace HistorianSyncTool.Forms
             };
             lblGapSummary = new Label
             {
-                Text = "Connect to both servers, then click 'Analyze Gaps'",
+                Text = "",
                 Dock = DockStyle.Top, Height = 40,
                 Font = AppTheme.Default, ForeColor = AppTheme.TextSecondary
             };
             lblDiffHint = new Label
             {
-                Text = "Click a row to zoom the timeline to it.",
+                Text = "",
                 Dock = DockStyle.Top, Height = 16,
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary,
                 Visible = false
@@ -424,7 +519,7 @@ namespace HistorianSyncTool.Forms
             pnlLog = new CollapsiblePanel
             {
                 Dock           = DockStyle.Bottom,
-                Title          = "ACTIVITY LOG",
+                Title          = "",
                 ExpandedHeight = 170
             };
             pnlLog.IsExpanded = false;
@@ -447,8 +542,8 @@ namespace HistorianSyncTool.Forms
                 BackColor = AppTheme.Surface,
                 Padding   = new Padding(4, 2, 4, 2)
             };
-            btnClearLog = MakeSmallButton("Clear",    DockStyle.Right);
-            btnCopyLog  = MakeSmallButton("Copy Log", DockStyle.Right);
+            btnClearLog = MakeSmallButton("", DockStyle.Right);
+            btnCopyLog  = MakeSmallButton("", DockStyle.Right);
             btnClearLog.Click += btnClearLog_Click;
             btnCopyLog.Click  += btnCopyLog_Click;
             pnlLogButtons.Controls.Add(btnClearLog);
@@ -475,25 +570,27 @@ namespace HistorianSyncTool.Forms
 
             // Row 0 — Read buttons + tag labels, each directly above its grid
             var pnlReadLeft = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(0, 2, 4, 0) };
-            btnReadPrimary = new FlatButton { Text = "Read Primary", Dock = DockStyle.Top, Height = 30 };
+            btnReadPrimary = new FlatButton { Text = "", Dock = DockStyle.Top, Height = 30 };
             btnReadPrimary.Click += btnReadPrimary_Click;
             lblGridPrimaryTag = new Label
             {
                 Text = "", Dock = DockStyle.Bottom, Height = 22,
                 Font = AppTheme.Bold, ForeColor = AppTheme.Navy,
-                TextAlign = ContentAlignment.MiddleCenter
+                TextAlign = ContentAlignment.MiddleCenter,
+                AutoEllipsis = true   // long point names must degrade visibly, not vanish
             };
             pnlReadLeft.Controls.Add(lblGridPrimaryTag);
             pnlReadLeft.Controls.Add(btnReadPrimary);
 
             var pnlReadRight = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(4, 2, 0, 0) };
-            btnReadSecondary = new FlatButton { Text = "Read Secondary", Dock = DockStyle.Top, Height = 30 };
+            btnReadSecondary = new FlatButton { Text = "", Dock = DockStyle.Top, Height = 30 };
             btnReadSecondary.Click += btnReadSecondary_Click;
             lblGridSecondaryTag = new Label
             {
                 Text = "", Dock = DockStyle.Bottom, Height = 22,
                 Font = AppTheme.Bold, ForeColor = AppTheme.Navy,
-                TextAlign = ContentAlignment.MiddleCenter
+                TextAlign = ContentAlignment.MiddleCenter,
+                AutoEllipsis = true
             };
             pnlReadRight.Controls.Add(lblGridSecondaryTag);
             pnlReadRight.Controls.Add(btnReadSecondary);
@@ -507,7 +604,7 @@ namespace HistorianSyncTool.Forms
                 var dg = (System.Windows.Forms.DataGridView)s;
                 if (dg.Rows.Count > 0) return;
                 System.Windows.Forms.TextRenderer.DrawText(e.Graphics,
-                    "Select a Primary tag to load data",
+                    Loc.T("grid.emptyPrimary"),
                     AppTheme.Default,
                     new Rectangle(0, dg.ColumnHeadersHeight, dg.Width, dg.Height - dg.ColumnHeadersHeight),
                     AppTheme.TextSecondary,
@@ -521,7 +618,7 @@ namespace HistorianSyncTool.Forms
                 var dg = (System.Windows.Forms.DataGridView)s;
                 if (dg.Rows.Count > 0) return;
                 System.Windows.Forms.TextRenderer.DrawText(e.Graphics,
-                    "Select a Secondary tag to load data",
+                    Loc.T("grid.emptySecondary"),
                     AppTheme.Default,
                     new Rectangle(0, dg.ColumnHeadersHeight, dg.Width, dg.Height - dg.ColumnHeadersHeight),
                     AppTheme.TextSecondary,
@@ -539,53 +636,60 @@ namespace HistorianSyncTool.Forms
             };
 
             // View group (top) — read-only actions
-            var pnlViewGroup = new Panel { Dock = DockStyle.Top, BackColor = AppTheme.Background };
-            var hdrView      = new SectionHeader { Text = "VIEW", Dock = DockStyle.Top, Height = 20 };
+            pnlViewGroup = new Panel { Dock = DockStyle.Top, BackColor = AppTheme.Background };
+            hdrView      = new SectionHeader { Text = "", Dock = DockStyle.Top, Height = 20 };
 
-            btnExport     = MakeStackedButton("Export CSV",  FlatButtonStyle.Secondary);
-            btnSyncScroll = MakeStackedButton("Sync Scroll", FlatButtonStyle.Secondary);
-            btnCompare    = MakeStackedButton("Compare",     FlatButtonStyle.Secondary);
+            btnExport     = MakeStackedButton("", FlatButtonStyle.Secondary);
+            btnSyncScroll = MakeStackedButton("", FlatButtonStyle.Secondary);
+            btnCompare    = MakeStackedButton("", FlatButtonStyle.Secondary);
 
             btnSyncScroll.Click += btnSyncScroll_Click;
             btnExport.Click     += btnExport_Click;
             btnCompare.Click    += btnCompare_Click;
 
-            // Dock=Top stacks in reverse-add order. Interleave 4px spacers.
+            // Dock=Top stacks in reverse-add order. Each spacer is tagged with the button it
+            // belongs to, so hiding a button in the simple view hides its gap too and the
+            // group keeps its exact height (see SizeActionGroups).
             pnlViewGroup.Controls.Add(btnExport);
-            pnlViewGroup.Controls.Add(MakeSpacer(4));
+            pnlViewGroup.Controls.Add(MakeSpacer(4, btnSyncScroll));
             pnlViewGroup.Controls.Add(btnSyncScroll);
-            pnlViewGroup.Controls.Add(MakeSpacer(4));
+            pnlViewGroup.Controls.Add(MakeSpacer(4, btnCompare));
             pnlViewGroup.Controls.Add(btnCompare);
             pnlViewGroup.Controls.Add(MakeSpacer(6));
             pnlViewGroup.Controls.Add(hdrView);
-            pnlViewGroup.Height = 20 + 6 + 30 + 4 + 30 + 4 + 30;
 
-            // Backfill group (bottom) — write actions + preview
-            var pnlBackfillGroup = new Panel { Dock = DockStyle.Bottom, BackColor = AppTheme.Background };
-            var hdrBackfill      = new SectionHeader { Text = "BACKFILL", Dock = DockStyle.Top, Height = 20 };
+            // Repair group (bottom) — everything that writes.
+            //   Simple view : one guarded action (btnRestore) + the undo history.
+            //   Advanced    : the per-direction copies and the two-direction preview as well.
+            // All of them end in the same preview-then-confirm flow; none writes directly.
+            pnlBackfillGroup = new Panel { Dock = DockStyle.Bottom, BackColor = AppTheme.Background };
+            hdrBackfill      = new SectionHeader { Text = "", Dock = DockStyle.Top, Height = 20 };
 
-            btnHistory         = MakeStackedButton("Backfill History…",   FlatButtonStyle.Secondary);
-            btnBackfillPreview = MakeStackedButton("Preview && Backfill…", FlatButtonStyle.Info);
-            btnCopyToSecondary = MakeStackedButton("Copy to Secondary →", FlatButtonStyle.Warning);
-            btnCopyToPrimary   = MakeStackedButton("← Copy to Primary",   FlatButtonStyle.Warning);
+            btnHistory         = MakeStackedButton("", FlatButtonStyle.Secondary);
+            btnBackfillPreview = MakeStackedButton("", FlatButtonStyle.Info);
+            btnCopyToSecondary = MakeStackedButton("", FlatButtonStyle.Warning);
+            btnCopyToPrimary   = MakeStackedButton("", FlatButtonStyle.Warning);
+            btnRestore         = MakeStackedButton("", FlatButtonStyle.Info);
+            btnRestore.Height  = 44;   // the one action in the simple view — give it weight
 
             btnHistory.Click         += btnHistory_Click;
             btnBackfillPreview.Click += btnBackfillPreview_Click;
             btnCopyToSecondary.Click += btnCopyToSecondary_Click;
             btnCopyToPrimary.Click   += btnCopyToPrimary_Click;
+            btnRestore.Click         += btnBackfillPreview_Click;   // same guarded flow
 
             // Added first = bottom-most. History sits at the bottom of the group,
-            // visually separated from the Copy/Preview actions.
+            // visually separated from the copy/restore actions.
             pnlBackfillGroup.Controls.Add(btnHistory);
             pnlBackfillGroup.Controls.Add(MakeSpacer(8));
             pnlBackfillGroup.Controls.Add(btnBackfillPreview);
-            pnlBackfillGroup.Controls.Add(MakeSpacer(4));
+            pnlBackfillGroup.Controls.Add(MakeSpacer(4, btnCopyToSecondary));
             pnlBackfillGroup.Controls.Add(btnCopyToSecondary);
-            pnlBackfillGroup.Controls.Add(MakeSpacer(4));
+            pnlBackfillGroup.Controls.Add(MakeSpacer(4, btnCopyToPrimary));
             pnlBackfillGroup.Controls.Add(btnCopyToPrimary);
+            pnlBackfillGroup.Controls.Add(btnRestore);
             pnlBackfillGroup.Controls.Add(MakeSpacer(6));
             pnlBackfillGroup.Controls.Add(hdrBackfill);
-            pnlBackfillGroup.Height = 20 + 6 + 30 + 4 + 30 + 4 + 30 + 8 + 30;
 
             pnlGridActions.Controls.Add(pnlViewGroup);     // Top group
             pnlGridActions.Controls.Add(pnlBackfillGroup); // Bottom group
@@ -612,11 +716,11 @@ namespace HistorianSyncTool.Forms
                 e.Graphics.DrawLine(new Pen(AppTheme.Border),
                     0, pnlTimeline.Height - 1, pnlTimeline.Width, pnlTimeline.Height - 1);
 
-            hdrTimeline = new SectionHeader { Text = "SYNC TIMELINE", Dock = DockStyle.Top };
+            hdrTimeline = new SectionHeader { Text = "", Dock = DockStyle.Top };
 
             lnkZoomOut = new LinkLabel
             {
-                Text            = "⟲  zoom back",
+                Text            = "",
                 Dock            = DockStyle.Right,
                 Width           = 110,
                 LinkColor       = Color.White,
@@ -649,15 +753,149 @@ namespace HistorianSyncTool.Forms
             pnlCenter.Controls.Add(pnlTimeline); // Top
 
             // ══════════════════════════════════════════════════════════════════════
-            // Add to form  (Dock order: Bottom, Left, Right, Fill)
+            // Add to form. Later-added docks OUTERMOST, so the header strip must come
+            // last to sit at the very top, with the demo banner directly beneath it.
             // ══════════════════════════════════════════════════════════════════════
             this.Controls.Add(pnlCenter);
             this.Controls.Add(pnlRight);
             this.Controls.Add(pnlLeft);
             this.Controls.Add(pnlStatusBar);
+            this.Controls.Add(pnlDemoBanner);
+            this.Controls.Add(pnlHeader);
+
+            SizeActionGroups();
+            ApplyTexts();
 
             this.ResumeLayout(false);
             this.PerformLayout();
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════
+        // Text assignment — ONE place, so switching language cannot leave a control
+        // behind in the old language. Called from InitializeComponent and whenever
+        // Loc.Language changes. Values that depend on live state (connection status,
+        // schedule label, tag-link toggle) are refreshed by their own updaters right
+        // after this runs — see MainForm.ApplyLanguage().
+        // ══════════════════════════════════════════════════════════════════════════
+        private void ApplyTexts()
+        {
+            this.Text            = Loc.T("app.title");
+            lblAppTitle.Text     = Loc.T("app.title");
+            chkAdvanced.Text     = Loc.T("app.advanced");
+            lblDemoBanner.Text   = Loc.T("app.demoBanner");
+
+            // Sidebar — servers
+            hdrConnection.Text   = Loc.T("hdr.connection");
+            lblPrimary.Text      = Loc.T("lbl.primaryServer");
+            lblSecondary.Text    = Loc.T("lbl.secondaryServer");
+            btnConnect.Text      = Loc.T("btn.connect");
+
+            // Sidebar — time range
+            hdrPeriod.Text       = Loc.T("hdr.period");
+            lblStartDate.Text    = Loc.T("lbl.startDate");
+            lblEndDate.Text      = Loc.T("lbl.endDate");
+            btnAnalyzeGaps.Text  = Loc.T("btn.analyze");
+
+            // Sidebar — measurement points
+            hdrTags.Text         = Loc.T("hdr.tags");
+            lblTagnameFilter.Text= Loc.T("lbl.tagFilter");
+            btnBrowseTags.Text   = Loc.T("btn.browseTags");
+            btnGetStats.Text     = Loc.T("btn.serverStats");
+            lblPrimaryTag.Text   = Loc.T("lbl.primaryTag");
+            lblSecondaryTag.Text = Loc.T("lbl.secondaryTag");
+
+            // Centre
+            hdrTimeline.Text     = Loc.T("hdr.timeline");
+            lnkZoomOut.Text      = Loc.T("link.zoomBack");
+            pnlLog.Title         = Loc.T("hdr.log");
+            btnClearLog.Text     = Loc.T("btn.clearLog");
+            btnCopyLog.Text      = Loc.T("btn.copyLog");
+            btnReadPrimary.Text  = Loc.T("btn.readPrimary");
+            btnReadSecondary.Text= Loc.T("btn.readSecondary");
+
+            hdrView.Text         = Loc.T("hdr.view");
+            hdrBackfill.Text     = Loc.T("hdr.repair");
+            btnExport.Text       = Loc.T("btn.export");
+            btnSyncScroll.Text   = Loc.T(_scrollSyncEnabled ? "btn.unsyncScroll" : "btn.syncScroll");
+            btnCompare.Text      = Loc.T(_isCompareMode ? "btn.rawView" : "btn.compare");
+            btnRestore.Text      = Loc.T("btn.restore");
+            btnCopyToPrimary.Text   = Loc.T("btn.copyToPrimary");
+            btnCopyToSecondary.Text = Loc.T("btn.copyToSecondary");
+            btnBackfillPreview.Text = Loc.T("btn.previewBackfill");
+            btnHistory.Text      = Loc.T("btn.history");
+
+            // Right panel
+            hdrGapAnalysis.Text  = Loc.T("hdr.missing");
+            lblDiffHint.Text     = Loc.T("missing.clickHint");
+            if (!_hasAnalysis) lblGapSummary.Text = Loc.T("missing.prompt");
+
+            // Grid headers
+            gridGaps.Columns["Tag"].HeaderText       = Loc.T("grid.point");
+            gridGaps.Columns["MissingOn"].HeaderText = Loc.T("grid.missingOn");
+            gridGaps.Columns["Samples"].HeaderText   = Loc.T("grid.readings");
+            gridGaps.Columns["Range"].HeaderText     = Loc.T("grid.period");
+            foreach (var g in new[] { gridPrimary, gridSecondary })
+            {
+                if (g.Columns.Count < 3) continue;   // SetupVirtualMode not run yet
+                g.Columns["Timestamp"].HeaderText = Loc.T("grid.time");
+                g.Columns["Value"].HeaderText     = Loc.T("grid.value");
+                g.Columns["Quality"].HeaderText   = Loc.T("grid.quality");
+            }
+
+            // Tooltips
+            _tips.SetToolTip(txtPrimary,     Loc.T("conn.hostTip"));
+            _tips.SetToolTip(txtSecondary,   Loc.T("conn.hostTip"));
+            _tips.SetToolTip(btnAnalyzeGaps, Loc.T("btn.analyze.tip"));
+            _tips.SetToolTip(btnRestore,     Loc.T("btn.restore.tip"));
+            _tips.SetToolTip(chkAdvanced,    Loc.T("app.advanced.tip"));
+            _tips.SetToolTip(lblDemoBanner,  Loc.T("app.demoBanner.tip"));
+
+            timeline.SetEmptyMessage(Loc.T("timeline.empty"));
+            gridPrimary.Invalidate();
+            gridSecondary.Invalidate();
+        }
+
+        /// <summary>
+        /// Heights of the two docked action groups, from their VISIBLE children only —
+        /// the simple view hides several buttons, and a fixed height would leave a hole.
+        /// </summary>
+        private void SizeActionGroups()
+        {
+            foreach (var grp in new[] { pnlViewGroup, pnlBackfillGroup })
+            {
+                int h = 0;
+                foreach (Control c in grp.Controls)
+                {
+                    // A spacer tagged with a control follows that control's visibility.
+                    var owner = c.Tag as Control;
+                    if (owner != null) SetShown(c, IsShown(owner));
+                    if (IsShown(c)) h += c.Height;
+                }
+                grp.Height = h;
+            }
+        }
+
+        /// <summary>
+        /// Re-stacks the MEASUREMENT POINTS section top-down over its visible controls.
+        /// The sidebar is absolutely positioned, so hiding a control in the simple view
+        /// would otherwise leave a gap. This section is the last one in the sidebar, so
+        /// its height can change freely.
+        /// </summary>
+        private void RelayoutTagsSection()
+        {
+            const int pad = 8;
+            int y = 8;
+            foreach (Control c in new Control[]
+                { lblTagnameFilter, txtTagnameFilter, pnlTagButtons,
+                  lblPrimaryTag, cboPrimary, btnTagLink, lblSecondaryTag, cboSecondary })
+            {
+                if (!IsShown(c)) continue;
+                c.Left = pad;
+                c.Top  = y;
+                y = c.Bottom + (c is Label ? 2 : 6);
+            }
+            if (cboSecondary.Parent != null)
+                cboSecondary.Parent.Height = y + 4;
         }
 
         // ══════════════════════════════════════════════════════════════════════════
@@ -677,10 +915,12 @@ namespace HistorianSyncTool.Forms
             // samples the other has. Plain-language columns; a full sentence on hover;
             // clicking a row zooms the timeline to that span. (All-tags view lives in
             // the Preview & Backfill dialog.)
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Tag",        Name = "Tag",       FillWeight = 23 });
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Missing on", Name = "MissingOn", FillWeight = 22 });
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Count",      Name = "Samples",   FillWeight = 17, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Period",     Name = "Range",     FillWeight = 38 });
+            // Header texts come from ApplyTexts. Weights leave room for the longest header
+            // in both languages ("Readings" / "Messwerte") without clipping.
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { Name = "Tag",       FillWeight = 26 });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { Name = "MissingOn", FillWeight = 21 });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { Name = "Samples",   FillWeight = 20, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            gridGaps.Columns.Add(new DataGridViewTextBoxColumn { Name = "Range",     FillWeight = 33 });
         }
 
         // ══════════════════════════════════════════════════════════════════════════
@@ -760,12 +1000,31 @@ namespace HistorianSyncTool.Forms
             Font = AppTheme.SectionLabel
         };
 
-        /// <summary>Invisible vertical spacer used between docked buttons.</summary>
-        private static Panel MakeSpacer(int height) => new Panel
+        /// <summary>
+        /// Invisible vertical spacer used between docked buttons. When <paramref name="owner"/>
+        /// is given, the spacer follows that control's visibility (see SizeActionGroups), so
+        /// hiding a button in the simple view does not leave its gap behind.
+        /// </summary>
+        private static Panel MakeSpacer(int height, Control owner = null) => new Panel
         {
             Dock = DockStyle.Top,
             Height = height,
-            BackColor = AppTheme.Background
+            BackColor = AppTheme.Background,
+            Tag = owner
+        };
+
+        /// <summary>EN / DE switch in the header strip.</summary>
+        private static LinkLabel MakeLangLink(string text) => new LinkLabel
+        {
+            Text            = text,
+            Dock            = DockStyle.Right,
+            Width           = 34,
+            Font            = AppTheme.SectionLabel,
+            LinkColor       = Color.FromArgb(205, 220, 238),
+            ActiveLinkColor = AppTheme.Teal,
+            LinkBehavior    = LinkBehavior.HoverUnderline,
+            TextAlign       = ContentAlignment.MiddleCenter,
+            Cursor          = Cursors.Hand
         };
     }
 }

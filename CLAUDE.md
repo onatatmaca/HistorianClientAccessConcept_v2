@@ -28,6 +28,9 @@ selective synchronization pipeline.
 ```
 Build:  Open ClientAccessDemo.sln → Build → Build Solution (Ctrl+Shift+B)
 Run:    F5 in Visual Studio (Debug, x86)
+Demo:   HistorianSyncTool.exe --demo   ← generated in-memory server pair, contacts nothing.
+                                         Use it for screenshot verification and for showing
+                                         the tool without a Historian.
 Target: x86 / .NET 4.8 — do not change platform target
 ```
 
@@ -44,6 +47,7 @@ HistorianClientAccessConcept_v2/
 │                                      SyncReportDialog, SchedulerSettingsDialog,
 │                                      BackfillHistoryDialog, ProgressDialog
 ├── Services/                        ← HistorianConnectionService, HistorianDataService,
+│                                      DemoDataService (offline `--demo` pair), ServerNaming,
 │                                      GapAnalysisService, SyncPlanner (backfill planning:
 │                                      aligned vs independent streams), RetryHelper,
 │                                      SampleFilter, SampleBucketer, IntervalBuilder,
@@ -54,7 +58,8 @@ HistorianClientAccessConcept_v2/
 │                                      SyncRunReport, TagBackfillResult, ServerStats,
 │                                      BackfillJournalEntry / BackfillJournalTag,
 │                                      TimelineData (TimeRange, TimelineTrackData, CopyableSegment)
-├── UI/                              ← AppTheme + Controls (FlatButton, CoverageBar,
+├── UI/                              ← AppTheme, Loc (all EN/DE strings) + Controls
+│                                      (FlatButton, CoverageBar,
 │                                      GapTimeline, SectionHeader, ConnectionDot,
 │                                      CollapsiblePanel)
 ├── lib/                             ← Local Proficy DLL copy for building WITHOUT the
@@ -78,16 +83,33 @@ All detailed conventions, patterns, and domain knowledge live in `.claude/rules/
 
 | File | Covers |
 |------|--------|
-| [`architecture.md`](.claude/rules/architecture.md) | Dual-server design, service-layer goals, data flow |
+| [`architecture.md`](.claude/rules/architecture.md) | Dual-server design, service-layer goals, data flow, **the UTC↔local time boundary** |
 | [`csharp-conventions.md`](.claude/rules/csharp-conventions.md) | C# coding conventions (scoped to `**/*.cs`) |
-| [`historian-api.md`](.claude/rules/historian-api.md) | Proficy API patterns, query types, write patterns |
+| [`historian-api.md`](.claude/rules/historian-api.md) | Proficy API patterns, query types, write patterns, **UTC frame + `DateTimeKind` rules** |
 | [`sync-workflow.md`](.claude/rules/sync-workflow.md) | Gap analysis, sync timeline, backfill, preview dialogs |
 | [`scheduling-and-revert.md`](.claude/rules/scheduling-and-revert.md) | Unattended scheduler (Phase 7) + revert/undo journal (Phase 8) |
 | [`known-issues.md`](.claude/rules/known-issues.md) | v2 bugs fixed (phase 8+) + open deferred items |
-| [`known-issues-archive.md`](.claude/rules/known-issues-archive.md) | Resolved v2 issues (phases 5–6) + v1-bug tracking table |
+| [`known-issues-archive.md`](.claude/rules/known-issues-archive.md) | Resolved v2 issues (phases 5–8) + v1-bug tracking table |
 | [`known-issues-v1.md`](.claude/rules/known-issues-v1.md) | v1 historical pitfalls — reference so v2 doesn't regress |
-| [`roadmap.md`](.claude/rules/roadmap.md) | Phase completion status and next items |
+| [`roadmap.md`](.claude/rules/roadmap.md) | Phase completion status (8+) and next items |
+| [`roadmap-archive.md`](.claude/rules/roadmap-archive.md) | Completed phases 1–7 |
 | [`test-environment.md`](.claude/rules/test-environment.md) | Test Historian servers, Genthin data ranges, MigrateIHA |
+
+## Change Discipline (standing directive — 2026-07-16)
+
+This tool writes to and deletes from a **production plant historian**. A wrong timestamp is
+destroyed data, not a failed test. So on **every** code change:
+
+- **Double-check and criticise your own change** before presenting it. Argue the opposite case.
+- **Audit the blast radius** — every caller, every other surface that shares the code path
+  (backfill / previews / timeline / table / scheduler / revert all go through the same
+  services; a "small" planner or time change hits all of them).
+- **Walk the edge cases** explicitly: empty server, single sample, DST boundaries (CET +1 vs
+  CEST +2), live edge, cancelled mid-run, legacy journal files, both-servers-missing.
+- **Verify empirically — never trust analysis alone, including a subagent's.** A confidently
+  reported "CRITICAL duplicate accumulation" bug was proven false only by running a probe
+  (0 duplicates in 113,521 samples). Measure it against a live server before you believe it.
+- **Screenshot-verify all UI work yourself** before reporting it done.
 
 ## Documentation Protocol
 

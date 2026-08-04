@@ -137,16 +137,16 @@ namespace HistorianSyncTool.Forms
 
             if (_multi)
                 _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Dir", Name = "Dir", FillWeight = 8, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Tag", Name = "Tag", FillWeight = _samplesOnly ? (_multi ? 50 : 62) : (_multi ? 26 : 30) });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("rep.col.point"), Name = "Tag", FillWeight = _samplesOnly ? (_multi ? 50 : 62) : (_multi ? 26 : 30) });
             if (!_samplesOnly)
             {
                 _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Attempted", Name = "Attempted", FillWeight = 11, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
                 _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Succeeded", Name = "Succeeded", FillWeight = 11, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
                 _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Failed",    Name = "Failed",    FillWeight = 9,  DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
             }
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Samples", Name = "Samples", FillWeight = _samplesOnly ? 30 : 14, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("rep.col.readings"), Name = "Samples", FillWeight = _samplesOnly ? 30 : 14, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
             if (!_samplesOnly)
-                _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Errors", Name = "Errors", FillWeight = 25 });
+                _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("rep.col.errors"), Name = "Errors", FillWeight = 25 });
 
             foreach (var rep in _reports)
             {
@@ -190,21 +190,21 @@ namespace HistorianSyncTool.Forms
 
             var btnClose = new FlatButton
             {
-                Text = "Close", ButtonStyle = FlatButtonStyle.Secondary,
+                Text = Loc.T("dlg.close"), ButtonStyle = FlatButtonStyle.Secondary,
                 Dock = DockStyle.Right, Width = 90
             };
             btnClose.Click += (s, e) => { DialogResult = DialogResult.OK; Close(); };
 
             var btnExportTxt = new FlatButton
             {
-                Text = "Export TXT", ButtonStyle = FlatButtonStyle.Secondary,
+                Text = Loc.T("rep.exportTxt"), ButtonStyle = FlatButtonStyle.Secondary,
                 Dock = DockStyle.Right, Width = 110
             };
             btnExportTxt.Click += (s, e) => ExportTxt();
 
             var btnExportCsv = new FlatButton
             {
-                Text = "Export CSV", ButtonStyle = FlatButtonStyle.Secondary,
+                Text = Loc.T("rep.exportCsv"), ButtonStyle = FlatButtonStyle.Secondary,
                 Dock = DockStyle.Right, Width = 110
             };
             btnExportCsv.Click += (s, e) => ExportCsv();

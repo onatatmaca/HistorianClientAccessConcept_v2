@@ -167,5 +167,50 @@ namespace HistorianSyncTool.Properties
             get { return (bool)this["TagLinkEnabled"]; }
             set { this["TagLinkEnabled"] = value; }
         }
+
+        /// <summary>UI language: "En" or "De".</summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("En")]
+        public string Language
+        {
+            get { return (string)this["Language"]; }
+            set { this["Language"] = value; }
+        }
+
+        /// <summary>Technical view: data tables, activity log, filters, per-direction copy
+        /// buttons and batch counters. Off by default — the simple view is the product.</summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool AdvancedMode
+        {
+            get { return (bool)this["AdvancedMode"]; }
+            set { this["AdvancedMode"] = value; }
+        }
+
+        /// <summary>
+        /// The user has explicitly confirmed that an automatic repair may run right after
+        /// startup. Auto-connect made that path reachable for the first time, so it is
+        /// confirmed once rather than inherited silently from an old settings file.
+        /// </summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ScheduleStartupConfirmed
+        {
+            get { return (bool)this["ScheduleStartupConfirmed"]; }
+            set { this["ScheduleStartupConfirmed"] = value; }
+        }
+
+        /// <summary>Connect to the saved servers automatically on startup.</summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool AutoConnectOnStartup
+        {
+            get { return (bool)this["AutoConnectOnStartup"]; }
+            set { this["AutoConnectOnStartup"] = value; }
+        }
     }
 }

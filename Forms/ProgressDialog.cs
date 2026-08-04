@@ -36,7 +36,7 @@ namespace HistorianSyncTool.Forms
 
         public ProgressDialog(string operationTitle)
         {
-            Text            = "Working…";
+            Text            = Loc.T("prog.working");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition   = FormStartPosition.CenterParent;
             ClientSize      = new Size(460, 196);
@@ -59,7 +59,7 @@ namespace HistorianSyncTool.Forms
 
             _lblDetail = new Label
             {
-                Text = "Starting…",
+                Text = Loc.T("prog.starting"),
                 Left = 20, Top = 40, Width = 420, Height = 18,
                 Font = AppTheme.Default, ForeColor = AppTheme.TextSecondary,
                 AutoEllipsis = true, AutoSize = false
@@ -93,14 +93,14 @@ namespace HistorianSyncTool.Forms
 
             _lblElapsed = new Label
             {
-                Text = "Elapsed 00:00",
+                Text = Loc.F("prog.elapsed", "00:00"),
                 Left = 20, Top = 152, Width = 200, Height = 18,
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary, AutoSize = false
             };
 
             _btnCancel = new FlatButton
             {
-                Text = "Cancel", ButtonStyle = FlatButtonStyle.Danger,
+                Text = Loc.T("prog.cancel"), ButtonStyle = FlatButtonStyle.Danger,
                 Left = 340, Top = 146, Width = 100, Height = 30
             };
             _btnCancel.Click += (s, e) => RaiseCancel();
@@ -118,9 +118,9 @@ namespace HistorianSyncTool.Forms
             _elapsedTimer.Tick += (s, e) =>
             {
                 TimeSpan t = DateTime.Now - _startedAt;
-                _lblElapsed.Text = t.TotalHours >= 1
-                    ? $"Elapsed {(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}"
-                    : $"Elapsed {t.Minutes:D2}:{t.Seconds:D2}";
+                _lblElapsed.Text = Loc.F("prog.elapsed", t.TotalHours >= 1
+                    ? $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}"
+                    : $"{t.Minutes:D2}:{t.Seconds:D2}");
             };
             _elapsedTimer.Start();
 
@@ -139,8 +139,8 @@ namespace HistorianSyncTool.Forms
             if (_cancelRequested) return;
             _cancelRequested = true;
             _btnCancel.Enabled = false;
-            _btnCancel.Text = "Cancelling…";
-            _lblDetail.Text = "Stopping after the current step…";
+            _btnCancel.Text = Loc.T("prog.cancelling");
+            _lblDetail.Text = Loc.T("prog.stopping");
             CancelRequested?.Invoke(this, EventArgs.Empty);
         }
 

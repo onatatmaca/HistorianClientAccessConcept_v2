@@ -92,7 +92,7 @@ namespace HistorianSyncTool.Forms
             _dataService = dataService;
 
             // ── Form ──────────────────────────────────────────────────────────────
-            Text            = "Select Tags for Backfill";
+            Text            = Loc.T("dlg.selectPoints");
             Size            = new Size(820, 700);
             MinimumSize     = new Size(660, 560);
             StartPosition   = FormStartPosition.CenterParent;
@@ -105,9 +105,10 @@ namespace HistorianSyncTool.Forms
             // ── Summary label ─────────────────────────────────────────────────────
             _lblSummary = new Label
             {
-                Text      = $"Backfill: {sourceLabel} → {targetLabel}\n" +
-                            $"{gapCount} gap window(s) • {backfillableBatches} backfillable batch(es) • " +
-                            $"{_sharedTags.Count} shared tag(s)",
+                Text      = Loc.F("dlg.direction",
+                                Services.ServerNaming.RoleTitle(sourceLabel),
+                                Services.ServerNaming.Role(targetLabel)) + "\n" +
+                            Loc.F("msg.sharedCount", _sharedTags.Count),
                 Dock      = DockStyle.Top,
                 Height    = 46,
                 Padding   = new Padding(16, 12, 16, 4),
@@ -119,7 +120,7 @@ namespace HistorianSyncTool.Forms
             // ── Progress bar ──────────────────────────────────────────────────────
             _lblProgress = new Label
             {
-                Text = "Loading per-tag stats…",
+                Text = Loc.T("dlg.loadingStats"),
                 Dock = DockStyle.Top, Height = 18,
                 Padding = new Padding(16, 0, 16, 0),
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary
@@ -158,10 +159,10 @@ namespace HistorianSyncTool.Forms
 
             _grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "", Name = "Sel",     FillWeight = 6 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Tag",           Name = "Tag",       FillWeight = 30, ReadOnly = true });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Source samples", Name = "Src",      FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Target samples", Name = "Tgt",      FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Will copy",      Name = "Missing",  FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Write range",    Name = "Range",    FillWeight = 25, ReadOnly = true });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.source"), Name = "Src",      FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.target"), Name = "Tgt",      FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.willCopy"), Name = "Missing",  FillWeight = 13, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.range"), Name = "Range",    FillWeight = 25, ReadOnly = true });
 
             foreach (var tag in _sharedTags)
                 _grid.Rows.Add(false, tag, "…", "…", "…", "…");
@@ -179,28 +180,28 @@ namespace HistorianSyncTool.Forms
 
             _btnSelectAll = new FlatButton
             {
-                Text = "Select All", ButtonStyle = FlatButtonStyle.Secondary,
+                Text = Loc.T("dlg.selectAll"), ButtonStyle = FlatButtonStyle.Secondary,
                 Left = 16, Top = 10, Width = 100, Height = 28
             };
             _btnSelectAll.Click += (s, e) => SetAllChecked(true);
 
             _btnSelectNone = new FlatButton
             {
-                Text = "Select None", ButtonStyle = FlatButtonStyle.Secondary,
+                Text = Loc.T("dlg.selectNone"), ButtonStyle = FlatButtonStyle.Secondary,
                 Left = 120, Top = 10, Width = 100, Height = 28
             };
             _btnSelectNone.Click += (s, e) => SetAllChecked(false);
 
             _btnCancel = new FlatButton
             {
-                Text = "Cancel", ButtonStyle = FlatButtonStyle.Secondary,
+                Text = Loc.T("dlg.cancel"), ButtonStyle = FlatButtonStyle.Secondary,
                 Dock = DockStyle.Right, Width = 90
             };
             _btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
 
             _btnOk = new FlatButton
             {
-                Text = "Start Backfill", ButtonStyle = FlatButtonStyle.Info,
+                Text = Loc.T("dlg.start"), ButtonStyle = FlatButtonStyle.Info,
                 Dock = DockStyle.Right, Width = 140, Enabled = false
             };
             _btnOk.Click += BtnOk_Click;
@@ -222,7 +223,7 @@ namespace HistorianSyncTool.Forms
 
             _lblTimelineTag = new Label
             {
-                Text = "TAG TIMELINE — select a tag above",
+                Text = Loc.T("dlg.timelineHint"),
                 Dock = DockStyle.Top, Height = 22,
                 Font = AppTheme.SectionLabel, ForeColor = AppTheme.Navy,
                 TextAlign = ContentAlignment.MiddleLeft
@@ -233,7 +234,7 @@ namespace HistorianSyncTool.Forms
                 Compact = true,
                 AllowZoom = false
             };
-            _tagTimeline.Clear("Select a tag above to see where its data sits on both servers.");
+            _tagTimeline.Clear(Loc.T("dlg.timelineEmpty"));
             pnlTagTimeline.Controls.Add(_tagTimeline);     // Fill
             pnlTagTimeline.Controls.Add(_lblTimelineTag);  // Top
 
@@ -366,7 +367,7 @@ namespace HistorianSyncTool.Forms
             BeginInvoke((Action)(() =>
             {
                 _progress.Visible = false;
-                _lblProgress.Text = "Per-tag stats loaded.";
+                _lblProgress.Text = Loc.T("dlg.statsLoaded");
                 _lblProgress.ForeColor = AppTheme.Success;
                 _btnOk.Enabled = true;
             }));
@@ -415,7 +416,8 @@ namespace HistorianSyncTool.Forms
                 Copyable    = SyncPlanner.ToSegments(
                     plan,
                     toSecondary: _targetLabel == "Secondary",
-                    description: $"This backfill would copy these sample(s) from {_sourceLabel} to {_targetLabel}")
+                    description: Loc.F("dlg.wouldCopy",
+                        Services.ServerNaming.Role(_sourceLabel), Services.ServerNaming.Role(_targetLabel)))
             };
             return preview;
         }
@@ -427,7 +429,7 @@ namespace HistorianSyncTool.Forms
             string tag = _grid.SelectedRows[0].Cells["Tag"].Value as string;
             if (string.IsNullOrEmpty(tag)) return;
 
-            _lblTimelineTag.Text = $"TAG TIMELINE — {tag}";
+            _lblTimelineTag.Text = Loc.F("dlg.timelineFor", tag);
 
             TagPreview pv;
             if (!_previews.TryGetValue(tag, out pv))
@@ -438,8 +440,9 @@ namespace HistorianSyncTool.Forms
 
             var top = new TimelineTrackData
             {
-                Label            = $"SOURCE — {_sourceLabel} · {pv.SrcCount:N0} samples",
-                TooltipName      = $"Source ({_sourceLabel})",
+                Label            = Loc.F("dlg.trackSource",
+                                       Services.ServerNaming.RoleTitle(_sourceLabel), pv.SrcCount.ToString("N0")),
+                TooltipName      = Services.ServerNaming.RoleTitle(_sourceLabel),
                 CoverageRatio    = pv.SrcCoverage,
                 HasData          = pv.SrcCount > 0,
                 FeasibilityKnown = true,
@@ -448,8 +451,9 @@ namespace HistorianSyncTool.Forms
             };
             var bottom = new TimelineTrackData
             {
-                Label            = $"TARGET — {_targetLabel} · {pv.TgtCount:N0} samples",
-                TooltipName      = $"Target ({_targetLabel})",
+                Label            = Loc.F("dlg.trackTarget",
+                                       Services.ServerNaming.RoleTitle(_targetLabel), pv.TgtCount.ToString("N0")),
+                TooltipName      = Services.ServerNaming.RoleTitle(_targetLabel),
                 CoverageRatio    = pv.TgtCoverage,
                 HasData          = pv.TgtCount > 0,
                 FeasibilityKnown = true,
@@ -470,7 +474,7 @@ namespace HistorianSyncTool.Forms
             }
             if (selected.Count == 0)
             {
-                MessageBox.Show(this, "Select at least one tag.", "No Tags Selected",
+                MessageBox.Show(this, Loc.T("dlg.nothingSelected"), Loc.T("dlg.nothingSelectedTitle"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }

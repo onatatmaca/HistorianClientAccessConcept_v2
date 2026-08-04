@@ -74,6 +74,68 @@ actually present, so a write that doesn't land is reported failed instead of loo
 Per GE docs, `DataSet` inherits `Dictionary<string,IDataSamples>` and adds no
 interfaces — no `using` needed, no leak.
 
+## Phase 9 items (moved from known-issues.md, Phase 12a)
+
+## BUG: "We can backfill forever" on live servers — live-edge diff (fixed Phase 9)
+**Location:** `Forms/MainForm.cs` · `ExecuteBackfill`, preview dialogs
+
+With the evaluation end at "now", every diff run found samples the target "lacked" that
+were simply still in flight (source collector writes first; the mirror lags seconds).
+Each backfill run therefore always reported something new to copy — feeling like an
+endless backfill even on perfectly healthy servers.
+
+**Fix:** every write path clamps the evaluation end to `now − LiveEdgeGraceSeconds`
+(app.config, default 120s): `ExecuteBackfill` itself, both Copy buttons (so the
+TagSelectionDialog counts match what is written), Preview & Backfill, and scheduled
+runs. Gap ANALYSIS is intentionally not clamped — the display tells the truth;
+only write planning ignores the live edge.
+
+Note the remaining, *correct* reasons coverage never reaches 100 %:
+- **Gaps present on BOTH servers** (plant outage / tag logged nothing) can never be
+  filled by a sync — the timeline now shows these gray ("missing on both") instead of
+  red, so they stop looking like sync failures.
+- Samples the target **rejects/compresses** are honestly reported failed each run
+  (see the Phase 8 whole-second verify) instead of silently "succeeding".
+
+---
+
+## BUG: Gap analysis read to the end of the archive (fixed Phase 9)
+**Location:** `Forms/MainForm.cs` · `SafeReadTimes`
+
+`SafeReadTimes` used `ReadRaw(conn, tag, from)` — a RawByTime query paged until the
+END of the archive — then filtered to `[from, to]` client-side. With real plant data
+(2+ years of archive) analyzing one week at the start of the archive read months of
+samples for nothing. Now uses `ReadRawInRange` (stops paging at the range end).
+
+---
+
+## RESOLVED: IP addresses + custom ports now supported (Phase 9)
+**Location:** `Services/HostInputParser`, `Services/ProficyEndpoint`, `HistorianConnectionService`
+
+Raw API behavior: connecting with an IP fails WCF's DNS-identity check (*"expected DNS
+identity … but the remote endpoint provided DNS claim 'TESTSV1'"*) —
+`CertificateValidationMode.None` does NOT bypass it and `ConnectionProperties` has no
+identity override or port property (verified by reflection + decompilation).
+
+**v2 solution** — both server fields accept `host`, `host:port`, `ip`, `ip:port`:
+- **Port**: the API builds its net.tcp URI from the public static
+  `HistorianAddress.TcpPort` (default 13000, or the `TcpPortNumber` appSetting).
+  `ProficyEndpoint.SetPortForNextConnect` sets it immediately before each Connect
+  (connections open sequentially, so per-server ports work).
+- **IP**: `ProficyEndpoint.PrepareForIp` prebuilds the WCF channel factory exactly as
+  `ServerConnection.Connect()` would (replicated from the decompiled 1.6.1.0 assembly)
+  but swaps in an `IdentityVerifier` that skips ONLY the DNS-name comparison. TLS and
+  the configured certificate validation mode still apply. Hostname connects never take
+  this path — they keep the full vendor-stock identity check. If a future ClientAccess
+  version changes internals, the helper throws a clear "use the hostname" message.
+- Verified live: app connected to 192.168.50.186/.187 by IP, browsed, analyzed and
+  previewed real data. (The server does NOT host the `Unsecured` endpoint, so that
+  simpler path was not available.)
+
+Optional login for remote servers that reject empty usernames: app.config
+`HistorianUsername` / `HistorianPassword` (empty = Windows session, the normal case
+when the tool runs on the Historian box itself).
+
 ---
 
 # Bugs Fixed vs v1 (historical tracking table, moved from roadmap.md)

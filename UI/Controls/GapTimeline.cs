@@ -35,7 +35,7 @@ namespace HistorianSyncTool.UI.Controls
         private TimelineTrackData _bottom;
         private List<CopyableSegment> _copyable = new List<CopyableSegment>();
         private string _stripNote;      // e.g. "different tags selected — copy strip hidden"
-        private string _emptyMessage = "Connect to the servers and run Analyze Gaps to see the timeline.";
+        private string _emptyMessage = "";
 
         /// <summary>Compact mode (preview dialogs): thinner rows, no legend.</summary>
         public bool Compact { get; set; }
@@ -86,6 +86,15 @@ namespace HistorianSyncTool.UI.Controls
             _copyable = copyable ?? new List<CopyableSegment>();
             _stripNote = stripNote;
             _hoverIndex = -2;
+            Invalidate();
+        }
+
+        /// <summary>Placeholder shown before anything has been analysed. Re-assigned when
+        /// the UI language changes.</summary>
+        public void SetEmptyMessage(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+            _emptyMessage = message;
             Invalidate();
         }
 
@@ -216,7 +225,7 @@ namespace HistorianSyncTool.UI.Controls
             {
                 using (var br = new SolidBrush(AppTheme.Border))
                     g.FillRectangle(br, rc);
-                string txt = data?.EmptyText ?? "not analyzed";
+                string txt = data?.EmptyText ?? Loc.T("timeline.notAnalyzed");
                 var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                 using (var br = new SolidBrush(AppTheme.TextSecondary))
                     g.DrawString(txt, AppTheme.Small, br, rc, fmt);
@@ -241,9 +250,8 @@ namespace HistorianSyncTool.UI.Controls
                         Rect = r,
                         Range = b,
                         Zoomable = true,
-                        Tip = $"Backfilled by this tool\n{RangeText(b)}\n" +
-                              $"These samples were copied here by a backfill run." +
-                              ZoomHint()
+                        Tip = Loc.T("timeline.tip.restored") + "\n" + RangeText(b) + "\n" +
+                              Loc.T("timeline.tip.restoredBody") + ZoomHint()
                     });
                 }
             }
@@ -261,9 +269,8 @@ namespace HistorianSyncTool.UI.Controls
                         Rect = r,
                         Range = u,
                         Zoomable = true,
-                        Tip = $"{sideName}: no data\n{RangeText(u)}\n" +
-                              "The other server has NO data here either — nothing to copy.\n" +
-                              "(plant outage or the tag simply logged nothing)" + ZoomHint()
+                        Tip = Loc.F("timeline.tip.noData", sideName) + "\n" + RangeText(u) + "\n" +
+                              Loc.T("timeline.tip.noDataBody") + ZoomHint()
                     });
                 }
             }
@@ -276,15 +283,15 @@ namespace HistorianSyncTool.UI.Controls
                     var r = SegRect(f, rc.Top, rc.Height);
                     if (r.Width <= 0) continue;
                     g.FillRectangle(br, r);
-                    string why = data.FeasibilityKnown
-                        ? "The other server HAS data here → a backfill can copy it."
-                        : "Missing here (other server not checked).";
+                    string why = Loc.T(data.FeasibilityKnown
+                        ? "timeline.tip.canCopy"
+                        : "timeline.tip.unknown");
                     _hits.Add(new Hit
                     {
                         Rect = r,
                         Range = f,
                         Zoomable = true,
-                        Tip = $"{sideName}: missing data\n{RangeText(f)}\n{why}" + ZoomHint()
+                        Tip = Loc.F("timeline.tip.missing", sideName) + "\n" + RangeText(f) + "\n" + why + ZoomHint()
                     });
                 }
             }
@@ -337,7 +344,8 @@ namespace HistorianSyncTool.UI.Controls
                         Rect = r,
                         Range = seg.Range,
                         Zoomable = true,
-                        Tip = $"Copy candidates: {seg.SampleCount:N0} sample(s)\n{RangeText(seg.Range)}\n{dir}" + ZoomHint()
+                        Tip = Loc.F("timeline.tip.candidates", seg.SampleCount.ToString("N0"))
+                              + "\n" + RangeText(seg.Range) + "\n" + dir + ZoomHint()
                     });
                 }
             }
@@ -370,11 +378,11 @@ namespace HistorianSyncTool.UI.Controls
             int x = rc.Left + 2;
             int boxY = rc.Top + (rc.Height - 9) / 2;
 
-            x = LegendItem(g, x, boxY, AppTheme.Success, "data", rc.Top);
-            x = LegendItem(g, x, boxY, AppTheme.Danger, "missing — other server has it", rc.Top);
-            x = LegendItem(g, x, boxY, Color.FromArgb(158, 166, 175), "missing on both", rc.Top);
-            x = LegendItem(g, x, boxY, Color.FromArgb(46, 134, 222), "backfilled by this tool", rc.Top);
-            LegendItem(g, x, boxY, AppTheme.Warning, "copy candidates", rc.Top);
+            x = LegendItem(g, x, boxY, AppTheme.Success, Loc.T("timeline.legend.data"), rc.Top);
+            x = LegendItem(g, x, boxY, AppTheme.Danger, Loc.T("timeline.legend.fillable"), rc.Top);
+            x = LegendItem(g, x, boxY, Color.FromArgb(158, 166, 175), Loc.T("timeline.legend.unfillable"), rc.Top);
+            x = LegendItem(g, x, boxY, Color.FromArgb(46, 134, 222), Loc.T("timeline.legend.restored"), rc.Top);
+            LegendItem(g, x, boxY, AppTheme.Warning, Loc.T("timeline.legend.candidates"), rc.Top);
         }
 
         private int LegendItem(Graphics g, int x, int boxY, Color color, string text, int textTop)
@@ -396,7 +404,7 @@ namespace HistorianSyncTool.UI.Controls
         }
 
         private string ZoomHint() =>
-            AllowZoom ? "\nClick to zoom the date range to this." : "";
+            AllowZoom ? Loc.T("timeline.tip.zoom") : "";
 
         private static string RangeText(TimeRange r) =>
             $"{r.Start:yyyy-MM-dd HH:mm:ss} → {r.End:yyyy-MM-dd HH:mm:ss}  ({FormatDuration(r.Duration)})";

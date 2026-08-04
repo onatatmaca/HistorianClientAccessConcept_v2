@@ -66,7 +66,7 @@ namespace HistorianSyncTool.Services
 
         // ── Tag Queries ────────────────────────────────────────────────────────────
 
-        public List<Tag> BrowseTags(ServerConnection conn, string tagnameMask)
+        public virtual List<Tag> BrowseTags(ServerConnection conn, string tagnameMask)
         {
             return RetryHelper.Retry(() =>
             {
@@ -83,7 +83,7 @@ namespace HistorianSyncTool.Services
             }, _maxRetries);
         }
 
-        public bool TagExists(ServerConnection conn, string tagName)
+        public virtual bool TagExists(ServerConnection conn, string tagName)
         {
             return RetryHelper.Retry(() =>
             {
@@ -97,7 +97,7 @@ namespace HistorianSyncTool.Services
 
         // ── Data Reads ─────────────────────────────────────────────────────────────
 
-        public List<(DateTime Time, float Value, double Quality)> ReadInterpolated(
+        public virtual List<(DateTime Time, float Value, double Quality)> ReadInterpolated(
             ServerConnection conn, string tagName, DateTime from, DateTime to, int count)
         {
             return RetryHelper.Retry(() =>
@@ -114,7 +114,7 @@ namespace HistorianSyncTool.Services
             }, _maxRetries);
         }
 
-        public List<(DateTime Time, float Value, double Quality)> ReadRaw(
+        public virtual List<(DateTime Time, float Value, double Quality)> ReadRaw(
             ServerConnection conn, string tagName, DateTime from)
         {
             return RetryHelper.Retry(() =>
@@ -142,7 +142,7 @@ namespace HistorianSyncTool.Services
         /// abandoning a RawByTime pagination mid-way leaks a server-side cursor until it
         /// expires ("Maximum number of cached items exceeded" — verified live).
         /// </summary>
-        public List<(DateTime Time, float Value, double Quality)> ReadRawInRange(
+        public virtual List<(DateTime Time, float Value, double Quality)> ReadRawInRange(
             ServerConnection conn, string tagName, DateTime start, DateTime end)
         {
             const uint chunk = 5000;
@@ -201,7 +201,7 @@ namespace HistorianSyncTool.Services
 
         // ── Data Writes ────────────────────────────────────────────────────────────
 
-        public List<string> WriteFloatSamples(
+        public virtual List<string> WriteFloatSamples(
             ServerConnection conn, string tagName,
             List<DateTime> times, List<float> values)
         {
@@ -225,7 +225,7 @@ namespace HistorianSyncTool.Services
             }, _maxRetries);
         }
 
-        public List<string> WriteFloatSamplesWithQuality(
+        public virtual List<string> WriteFloatSamplesWithQuality(
             ServerConnection conn, string tagName,
             DateTime[] times, float[] values, DataQuality[] qualities)
         {
@@ -268,7 +268,7 @@ namespace HistorianSyncTool.Services
             return allMessages;
         }
 
-        public (int Expected, int Actual) VerifyWrite(
+        public virtual (int Expected, int Actual) VerifyWrite(
             ServerConnection conn, string tagName,
             DateTime start, DateTime end, int expectedCount)
         {
@@ -283,7 +283,7 @@ namespace HistorianSyncTool.Services
         /// pre-existing samples on the server are left untouched. Chunked at 1000 pairs
         /// per call to keep each request bounded. Returns any per-tag error messages.
         /// </summary>
-        public List<string> DeleteSamples(ServerConnection conn, string tagName, IList<DateTime> times)
+        public virtual List<string> DeleteSamples(ServerConnection conn, string tagName, IList<DateTime> times)
         {
             var messages = new List<string>();
             if (times == null || times.Count == 0) return messages;

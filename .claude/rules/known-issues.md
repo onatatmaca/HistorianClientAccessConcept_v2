@@ -10,6 +10,42 @@ moved to [`known-issues-archive.md`](known-issues-archive.md); v1 pitfalls are i
 
 ---
 
+## BUG: "restored by this tool" band drawn 1–2 h off (fixed Phase 12a)
+**Location:** `Forms/MainForm.cs` · `LoadBackfilledRanges`
+
+Journal ticks are stored in **UTC** on purpose (so legacy and new entries revert identically),
+but the band was read back with a plain `new DateTime(tk)` — `Kind=Unspecified` — and then
+compared against the LOCAL analysis window and drawn on a LOCAL axis. The blue band therefore
+sat 1 h (CET) or 2 h (CEST) away from the data it described, and was clipped against the wrong
+window edges. **Fix:** `new DateTime(tk, DateTimeKind.Utc).ToLocalTime()`, exactly what
+`RevertBackfill` already does. Display-only — the revert path itself was always correct.
+
+## BUG: a hidden ComboBox reports NO selected point (fixed Phase 12a)
+**Location:** `Forms/MainForm.cs` · point selection
+
+The simple view hides the mirror point selector. A WinForms `ComboBox` with
+`DropDownStyle.DropDown` keeps its text in the edit control, so while it is hidden (no window
+handle) **`ComboBox.Text` returns "" and `SelectedItem` returns null** even though a point is
+bound and selected. That is not cosmetic: `RunGapAnalysis` treats an empty point name as
+"use the configured HistSync tag", so the app would have analysed — and offered to repair — a
+different point than the one on screen.
+
+**Fix:** the selected point is explicit app state (`_pointPrimary` / `_pointSecondary`), set
+whenever the selection changes and used by every consumer; the combos are only an input device.
+`PointName(combo)` is the one place that reads a combo, and it prefers typed text only while the
+control really has a handle. **Rule: never derive state from a control that the view mode may
+hide.**
+
+## BUG: table caption silently truncated (fixed Phase 12a)
+`"HOST — point"` did not fit the caption label above each data table and rendered as `"HOST — "`
+with the point name simply gone — no ellipsis, no clue. Captions are now the point name alone
+(the button above already names the server, the header strip names both hosts) and both labels
+have `AutoEllipsis = true` so overflow is visible instead of silent. Related: setting `.Text`
+while a modal progress dialog covers the window does not always reach the screen — the caption
+is now written in one place (`UpdateGridHeaders`) which ends with `Refresh()`.
+
+---
+
 ## INCIDENT + OPEN DEFECTS: UTC frame vs `DateTime.Now` (2026-07-16, audited)
 
 **Proven** (live probes, see [`historian-api.md`](historian-api.md)): the API frame is **UTC**
@@ -99,68 +135,6 @@ abandoned query until expiry (verified live: "Maximum number of cached items exc
 which then fails later queries too). **Fix:** bounded `RawByNumberQuery` chunks
 (5000/call, each drained), stopping at the range end. Never abandon a paged RawByTime
 query — that applies to any script touching the API as well.
-
-## BUG: "We can backfill forever" on live servers — live-edge diff (fixed Phase 9)
-**Location:** `Forms/MainForm.cs` · `ExecuteBackfill`, preview dialogs
-
-With the evaluation end at "now", every diff run found samples the target "lacked" that
-were simply still in flight (source collector writes first; the mirror lags seconds).
-Each backfill run therefore always reported something new to copy — feeling like an
-endless backfill even on perfectly healthy servers.
-
-**Fix:** every write path clamps the evaluation end to `now − LiveEdgeGraceSeconds`
-(app.config, default 120s): `ExecuteBackfill` itself, both Copy buttons (so the
-TagSelectionDialog counts match what is written), Preview & Backfill, and scheduled
-runs. Gap ANALYSIS is intentionally not clamped — the display tells the truth;
-only write planning ignores the live edge.
-
-Note the remaining, *correct* reasons coverage never reaches 100 %:
-- **Gaps present on BOTH servers** (plant outage / tag logged nothing) can never be
-  filled by a sync — the timeline now shows these gray ("missing on both") instead of
-  red, so they stop looking like sync failures.
-- Samples the target **rejects/compresses** are honestly reported failed each run
-  (see the Phase 8 whole-second verify) instead of silently "succeeding".
-
----
-
-## BUG: Gap analysis read to the end of the archive (fixed Phase 9)
-**Location:** `Forms/MainForm.cs` · `SafeReadTimes`
-
-`SafeReadTimes` used `ReadRaw(conn, tag, from)` — a RawByTime query paged until the
-END of the archive — then filtered to `[from, to]` client-side. With real plant data
-(2+ years of archive) analyzing one week at the start of the archive read months of
-samples for nothing. Now uses `ReadRawInRange` (stops paging at the range end).
-
----
-
-## RESOLVED: IP addresses + custom ports now supported (Phase 9)
-**Location:** `Services/HostInputParser`, `Services/ProficyEndpoint`, `HistorianConnectionService`
-
-Raw API behavior: connecting with an IP fails WCF's DNS-identity check (*"expected DNS
-identity … but the remote endpoint provided DNS claim 'TESTSV1'"*) —
-`CertificateValidationMode.None` does NOT bypass it and `ConnectionProperties` has no
-identity override or port property (verified by reflection + decompilation).
-
-**v2 solution** — both server fields accept `host`, `host:port`, `ip`, `ip:port`:
-- **Port**: the API builds its net.tcp URI from the public static
-  `HistorianAddress.TcpPort` (default 13000, or the `TcpPortNumber` appSetting).
-  `ProficyEndpoint.SetPortForNextConnect` sets it immediately before each Connect
-  (connections open sequentially, so per-server ports work).
-- **IP**: `ProficyEndpoint.PrepareForIp` prebuilds the WCF channel factory exactly as
-  `ServerConnection.Connect()` would (replicated from the decompiled 1.6.1.0 assembly)
-  but swaps in an `IdentityVerifier` that skips ONLY the DNS-name comparison. TLS and
-  the configured certificate validation mode still apply. Hostname connects never take
-  this path — they keep the full vendor-stock identity check. If a future ClientAccess
-  version changes internals, the helper throws a clear "use the hostname" message.
-- Verified live: app connected to 192.168.50.186/.187 by IP, browsed, analyzed and
-  previewed real data. (The server does NOT host the `Unsecured` endpoint, so that
-  simpler path was not available.)
-
-Optional login for remote servers that reject empty usernames: app.config
-`HistorianUsername` / `HistorianPassword` (empty = Windows session, the normal case
-when the tool runs on the Historian box itself).
-
----
 
 ## DOC FIX: IData.Add's second argument is errorOnReplace, not "allowOutOfOrder"
 Verified by reflecting the v1.6.1.0 DLL: `Add(DataSet dataset, Boolean errorOnReplace,

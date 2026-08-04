@@ -13,6 +13,29 @@ Both are `ServerConnection` objects. Most operations require both to be connecte
 hostname is derived from the primary at startup: if the primary ends with `PC2`, the secondary
 strips that suffix; otherwise `PC2` is appended.
 
+## View modes, language and demo mode (Phase 12a)
+- **Simple is the product, Advanced only ADDS.** `Settings.AdvancedMode` (default off) toggles
+  the technical surface: filter box, Server statistics, point link + mirror selector, activity
+  log, Compare/Link-scrolling, per-direction copy buttons, batch counters, gap rule on the
+  timeline. `MainForm.ApplyViewMode()` is the only place that decides. Nothing is deleted, so a
+  diagnostic view used during an acceptance test is one click away.
+- Anything hidden must keep a working default — the tag mask falls back to `*`
+  (`EffectiveMask()`), the point link is forced on. **Never read state off a control the view
+  mode can hide**: a hidden ComboBox reports no selection at all (see `known-issues.md`), which
+  is why the selected point lives in `_pointPrimary` / `_pointSecondary`.
+- **Language**: `UI/Loc.cs` holds every user-visible string EN+DE and raises `LanguageChanged`;
+  `MainForm.Designer.ApplyTexts()` assigns them in ONE place, `MainForm.ApplyLanguage()` also
+  re-runs the analysis so strings produced during a run are not left in the old language.
+- **Server naming**: `Services/ServerNaming` turns the internal labels into "HOST — main server"
+  / "HOST — mirror". The internal `"Primary"`/`"Secondary"` strings are load-bearing (journal
+  entries, `ScheduleDirection`, `ExecuteBackfill` branching) — **rename on screen, never in
+  storage**, or old runs can no longer be reverted.
+- **Demo mode** (`--demo`): `DemoDataService : HistorianDataService` overrides every API method
+  and never calls `base`, and `HistorianConnectionService.EnableDemoMode` hands out two
+  never-connected sentinel connections. A demo session therefore cannot touch a server. Used for
+  screenshot verification and for showing the tool without a Historian; an amber banner makes it
+  unmistakable.
+
 ## UI Layer (WinForms) — Phase 9 layout
 - Main form: `Forms/MainForm` (+ dialogs: TagSelection, BidirectionalBackfill,
   SyncReport, BackfillHistory, SchedulerSettings, Progress)
@@ -37,7 +60,7 @@ Extract these three services from the form class:
 | Service | Responsibility |
 |---|---|
 | `HistorianConnectionService` | Open/close `ServerConnection`, optional config login, connection state |
-| `HistorianDataService` | All `IData` and `ITags` queries and writes (retry-wrapped) |
+| `HistorianDataService` | All `IData` and `ITags` queries and writes (retry-wrapped). **THE time-frame boundary** — see below |
 | `GapAnalysisService` | Gap detection (per-tag p90 rule), batch planning, feasibility marking |
 | `SyncPlanner` | THE definition of "what would a backfill copy" (Phase 10): per-tag aligned-vs-independent stream detection, outage-window planning; shared by backfill, previews, timeline strip and table (tested) |
 | `IntervalBuilder` | Pure interval math for the timeline: merge points→ranges, percentile cadence, complement, intersect (tested) |
@@ -45,6 +68,22 @@ Extract these three services from the form class:
 
 The form should only wire UI events and delegate to services. Services must have no `Form`/`Control`
 dependencies so they can be unit tested independently.
+
+## Time frames — one boundary, no exceptions (Phase 11)
+The Historian API works in **UTC**; the **rest of the app works in LOCAL time** (date pickers,
+`DateTime.Now`, every display). `HistorianDataService.ToApi()` / `FromApi()` is the **single**
+conversion point — applied to query bounds, returned times, writes and deletes.
+
+**Do not convert anywhere else, and never mix the frames.** .NET compares raw `Ticks` and ignores
+`DateTimeKind`, so a `DateTime.Now` compared against an API timestamp is silently wrong by the UTC
+offset (1 h winter / 2 h summer). That single mistake previously made the live-edge guard a dead
+no-op, let the scheduler evaluate the future, made "Last 1h" return nothing, and shifted every
+evaluation window by an hour. Keeping the boundary in one place is what makes those correct *by
+construction*. Details + the proof: [`historian-api.md`](historian-api.md).
+
+**Exception — the backfill journal is stored in UTC ticks** (`long[]`, never `DateTime`), so legacy
+and new entries revert identically. `RevertBackfill` re-tags them `Kind=Utc` on the way out. Do not
+"normalise" them to local: old reverts would then delete at an instant 1–2 h off, i.e. real data.
 
 ## Data Flow per Use Case
 
@@ -73,8 +112,9 @@ dependencies so they can be unit tested independently.
 ### Per-Tag Gap Analysis (display only; Phase 9 feeds the SYNC TIMELINE)
 1. `RunGapAnalysis` reads the tag SELECTED per side (`cboPrimary`/`cboSecondary`,
    normally mirrored by the tag link); falls back to `SyncTagName` if a combo is empty
-2. `Analyze` per server: median interval, `threshold = max(median × 1.5, MinimumGapSeconds)`;
-   empty server ⇒ one whole-period `GapWindow`; `CanBackfill` marked per batch from
+2. `Analyze` per server: per-tag rule `threshold = max(p90(intervals) × GapThresholdMultiplier,
+   MinimumGapSeconds)` (Phase 10 — NOT median × 1.5, which collapsed coverage on deadband
+   tags); empty server ⇒ one whole-period `GapWindow`; `CanBackfill` marked per batch from
    the OPPOSITE server's data
 3. The worker also prepares all timeline data off-thread: fillable/unfillable segments
    (`IntervalBuilder.SplitByFeasibility`), copy-candidate runs (whole-second diff),

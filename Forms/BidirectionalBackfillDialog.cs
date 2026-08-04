@@ -80,7 +80,7 @@ namespace HistorianSyncTool.Forms
             _dataService   = dataService;
 
             // ── Form ──────────────────────────────────────────────────────────────
-            Text            = "Preview & Backfill — both directions";
+            Text            = Loc.T("dlg.previewBoth");
             Size            = new Size(940, 720);
             MinimumSize     = new Size(720, 560);
             StartPosition   = FormStartPosition.CenterParent;
@@ -93,15 +93,16 @@ namespace HistorianSyncTool.Forms
             // ── Summary + progress ─────────────────────────────────────────────────
             _lblSummary = new Label
             {
-                Text = $"Comparing both servers across {_rangeStart:MM-dd HH:mm} → {_rangeEnd:MM-dd HH:mm}\n" +
-                       $"{_sharedTags.Count} shared tag(s). Each list shows what one server is missing from the other.",
+                Text = Loc.F("dlg.comparingRange", _rangeStart.ToString("yyyy-MM-dd HH:mm"),
+                                 _rangeEnd.ToString("yyyy-MM-dd HH:mm")) + "\n" +
+                       Loc.F("msg.sharedCount", _sharedTags.Count),
                 Dock = DockStyle.Top, Height = 46,
                 Padding = new Padding(16, 12, 16, 4),
                 Font = AppTheme.Default, ForeColor = AppTheme.TextPrimary, AutoSize = false
             };
             _lblProgress = new Label
             {
-                Text = "Comparing…", Dock = DockStyle.Top, Height = 18,
+                Text = Loc.T("dlg.comparing"), Dock = DockStyle.Top, Height = 18,
                 Padding = new Padding(16, 0, 16, 0),
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary
             };
@@ -118,10 +119,10 @@ namespace HistorianSyncTool.Forms
                 SplitterWidth = 6,
                 BackColor = AppTheme.Background
             };
-            _split.Panel1.Controls.Add(BuildSide(_gridP2S, "Primary → Secondary",
-                "Primary has these — copy to Secondary", AppTheme.RowAlt));
-            _split.Panel2.Controls.Add(BuildSide(_gridS2P, "Secondary → Primary",
-                "Secondary has these — copy to Primary", AppTheme.RowAltWarm));
+            _split.Panel1.Controls.Add(BuildSide(_gridP2S, Loc.T("dlg.sideToMirror"),
+                Loc.T("dlg.sideToMirrorHint"), AppTheme.RowAlt));
+            _split.Panel2.Controls.Add(BuildSide(_gridS2P, Loc.T("dlg.sideToMain"),
+                Loc.T("dlg.sideToMainHint"), AppTheme.RowAltWarm));
 
             // ── Bottom buttons ─────────────────────────────────────────────────────
             var pnlButtons = new Panel
@@ -134,14 +135,14 @@ namespace HistorianSyncTool.Forms
 
             _btnCancel = new FlatButton
             {
-                Text = "Cancel", ButtonStyle = FlatButtonStyle.Secondary,
+                Text = Loc.T("dlg.cancel"), ButtonStyle = FlatButtonStyle.Secondary,
                 Dock = DockStyle.Right, Width = 90
             };
             _btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
 
             _btnStart = new FlatButton
             {
-                Text = "Start Backfill", ButtonStyle = FlatButtonStyle.Info,
+                Text = Loc.T("dlg.start"), ButtonStyle = FlatButtonStyle.Info,
                 Dock = DockStyle.Right, Width = 140, Enabled = false
             };
             _btnStart.Click += BtnStart_Click;
@@ -161,7 +162,7 @@ namespace HistorianSyncTool.Forms
 
             _lblTimelineTag = new Label
             {
-                Text = "TAG TIMELINE — select a tag above",
+                Text = Loc.T("dlg.timelineHint"),
                 Dock = DockStyle.Top, Height = 22,
                 Font = AppTheme.SectionLabel, ForeColor = AppTheme.Navy,
                 TextAlign = ContentAlignment.MiddleLeft
@@ -172,7 +173,7 @@ namespace HistorianSyncTool.Forms
                 Compact = true,
                 AllowZoom = false
             };
-            _tagTimeline.Clear("Select a tag above to see where its data sits on both servers.");
+            _tagTimeline.Clear(Loc.T("dlg.timelineEmpty"));
             pnlTagTimeline.Controls.Add(_tagTimeline);     // Fill
             pnlTagTimeline.Controls.Add(_lblTimelineTag);  // Top
 
@@ -222,8 +223,8 @@ namespace HistorianSyncTool.Forms
 
             g.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "", Name = "Sel", FillWeight = 8 });
             g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Tag",       Name = "Tag",     FillWeight = 42, ReadOnly = true });
-            g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Will copy", Name = "Missing", FillWeight = 16, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Range",     Name = "Range",   FillWeight = 34, ReadOnly = true });
+            g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.willCopy"), Name = "Missing", FillWeight = 16, ReadOnly = true, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            g.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = Loc.T("dlg.col.range"), Name = "Range",   FillWeight = 34, ReadOnly = true });
             return g;
         }
 
@@ -233,8 +234,8 @@ namespace HistorianSyncTool.Forms
             var panel = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Surface };
 
             var toolbar = new Panel { Dock = DockStyle.Top, Height = 30, BackColor = AppTheme.Surface };
-            var btnAll = new FlatButton { Text = "All",  ButtonStyle = FlatButtonStyle.Secondary, Left = 8,  Top = 2, Width = 56, Height = 24 };
-            var btnNone = new FlatButton { Text = "None", ButtonStyle = FlatButtonStyle.Secondary, Left = 68, Top = 2, Width = 56, Height = 24 };
+            var btnAll = new FlatButton { Text = Loc.T("dlg.all"),  ButtonStyle = FlatButtonStyle.Secondary, Left = 8,  Top = 2, Width = 56, Height = 24 };
+            var btnNone = new FlatButton { Text = Loc.T("dlg.none"), ButtonStyle = FlatButtonStyle.Secondary, Left = 68, Top = 2, Width = 56, Height = 24 };
             btnAll.Click  += (s, e) => SetAllChecked(grid, true);
             btnNone.Click += (s, e) => SetAllChecked(grid, false);
             toolbar.Controls.Add(btnAll);
@@ -263,8 +264,8 @@ namespace HistorianSyncTool.Forms
             {
                 _progress.Visible = false;
                 _lblProgress.Text = _sharedTags.Count == 0
-                    ? "No tags exist on both servers."
-                    : "Cannot compare — missing connection.";
+                    ? Loc.T("dlg.noShared")
+                    : Loc.T("dlg.noConnection");
                 _lblProgress.ForeColor = AppTheme.Danger;
                 _btnStart.Enabled = false;
                 return;
@@ -326,7 +327,7 @@ namespace HistorianSyncTool.Forms
                     if (cp2s > 0) { _gridP2S.Rows.Add(true, tag, cp2s.ToString("N0"), RangeText(pf, pl)); _p2sRows++; }
                     if (cs2p > 0) { _gridS2P.Rows.Add(true, tag, cs2p.ToString("N0"), RangeText(sf, sl)); _s2pRows++; }
                     _progress.Value = Math.Min(idx + 1, _progress.Maximum);
-                    _lblProgress.Text = $"Comparing… {idx + 1}/{_sharedTags.Count}";
+                    _lblProgress.Text = Loc.F("dlg.comparingN", idx + 1, _sharedTags.Count);
                 }));
             }
 
@@ -338,13 +339,13 @@ namespace HistorianSyncTool.Forms
             _progress.Visible = false;
             if (_p2sRows == 0 && _s2pRows == 0)
             {
-                _lblProgress.Text = "In sync — nothing to copy in either direction.";
+                _lblProgress.Text = Loc.T("dlg.inSyncBoth");
                 _lblProgress.ForeColor = AppTheme.Success;
                 _btnStart.Enabled = false;
             }
             else
             {
-                _lblProgress.Text = $"Ready — {_p2sRows} tag(s) to copy → Secondary, {_s2pRows} tag(s) → Primary.";
+                _lblProgress.Text = Loc.F("dlg.readyCounts", _p2sRows, _s2pRows);
                 _lblProgress.ForeColor = AppTheme.Success;
                 _btnStart.Enabled = true;
             }
@@ -413,7 +414,7 @@ namespace HistorianSyncTool.Forms
             _lblTimelineTag.Text = $"TAG TIMELINE — {tag}";
             var top = new TimelineTrackData
             {
-                Label            = $"PRIMARY · {pv.PriCount:N0} samples",
+                Label            = Loc.F("dlg.trackMain", pv.PriCount.ToString("N0")),
                 CoverageRatio    = pv.PriCoverage,
                 HasData          = pv.PriCount > 0,
                 FeasibilityKnown = true,
@@ -422,7 +423,7 @@ namespace HistorianSyncTool.Forms
             };
             var bottom = new TimelineTrackData
             {
-                Label            = $"SECONDARY · {pv.SecCount:N0} samples",
+                Label            = Loc.F("dlg.trackMirror", pv.SecCount.ToString("N0")),
                 CoverageRatio    = pv.SecCoverage,
                 HasData          = pv.SecCount > 0,
                 FeasibilityKnown = true,
@@ -460,8 +461,8 @@ namespace HistorianSyncTool.Forms
             var s2p = CollectChecked(_gridS2P);
             if (p2s.Count == 0 && s2p.Count == 0)
             {
-                MessageBox.Show(this, "Select at least one tag in either direction.",
-                    "No Tags Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, Loc.T("dlg.nothingSelected"),
+                    Loc.T("dlg.nothingSelectedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             SelectedPrimaryToSecondary = p2s;

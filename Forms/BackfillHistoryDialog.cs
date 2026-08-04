@@ -30,7 +30,7 @@ namespace HistorianSyncTool.Forms
         {
             _entries = entries ?? new List<BackfillJournalEntry>();
 
-            Text            = "Backfill History";
+            Text            = Loc.T("hist.title");
             Size            = new Size(860, 520);
             MinimumSize     = new Size(680, 380);
             StartPosition   = FormStartPosition.CenterParent;
@@ -72,13 +72,13 @@ namespace HistorianSyncTool.Forms
             _grid.ColumnHeadersDefaultCellStyle.Font      = AppTheme.SectionLabel;
             _grid.AlternatingRowsDefaultCellStyle.BackColor = AppTheme.RowAlt;
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Run time",   Name = "Run",     FillWeight = 19 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Duration",    Name = "Dur",     FillWeight = 10, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Mode",        Name = "Mode",    FillWeight = 10 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Direction",   Name = "Dir2",    FillWeight = 23 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Tags",        Name = "Tags",    FillWeight = 9,  DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Samples",     Name = "Samples", FillWeight = 12, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Status",      Name = "Status",  FillWeight = 17 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("hist.col.run"),      Name = "Run",     FillWeight = 19 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("hist.col.duration"), Name = "Dur",     FillWeight = 10, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("hist.col.mode"),     Name = "Mode",    FillWeight = 10 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("hist.col.direction"),Name = "Dir2",    FillWeight = 23 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("hist.col.points"),   Name = "Tags",    FillWeight = 9,  DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("hist.col.readings"), Name = "Samples", FillWeight = 12, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = Loc.T("hist.col.status"),   Name = "Status",  FillWeight = 17 });
 
             foreach (var e in _entries)
             {
@@ -111,7 +111,7 @@ namespace HistorianSyncTool.Forms
 
             _chkArm = new CheckBox
             {
-                Text = "Enable revert — I understand this permanently deletes the written samples",
+                Text = Loc.T("hist.enable"),
                 Location = new Point(16, 10),
                 Size = new Size(620, 22),
                 ForeColor = AppTheme.Danger,
@@ -121,7 +121,7 @@ namespace HistorianSyncTool.Forms
 
             _btnRevert = new FlatButton
             {
-                Text = "Revert selected run…",
+                Text = Loc.T("hist.revert"),
                 ButtonStyle = FlatButtonStyle.Danger,
                 Left = 16, Top = 46, Width = 200, Height = 32,
                 Enabled = false
@@ -130,7 +130,7 @@ namespace HistorianSyncTool.Forms
 
             _btnView = new FlatButton
             {
-                Text = "View report…",
+                Text = Loc.T("hist.viewReport"),
                 ButtonStyle = FlatButtonStyle.Secondary,
                 Left = 224, Top = 46, Width = 160, Height = 32
             };
@@ -138,7 +138,7 @@ namespace HistorianSyncTool.Forms
 
             var btnClose = new FlatButton
             {
-                Text = "Close", ButtonStyle = FlatButtonStyle.Secondary,
+                Text = Loc.T("dlg.close"), ButtonStyle = FlatButtonStyle.Secondary,
                 Top = 46, Width = 100, Height = 32,
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 Left = pnlButtons.Width - 116
@@ -152,7 +152,7 @@ namespace HistorianSyncTool.Forms
 
             var lblEmpty = new Label
             {
-                Text = "No backfill runs recorded yet.",
+                Text = Loc.T("hist.empty"),
                 Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.TextSecondary, Visible = _entries.Count == 0
             };

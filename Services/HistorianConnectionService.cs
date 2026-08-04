@@ -29,8 +29,16 @@ namespace HistorianSyncTool.Services
         private ServerConnection _secondary;
         private bool _disposed;
 
-        public bool IsPrimaryConnected => _primary != null && _primary.IsConnected();
-        public bool IsSecondaryConnected => _secondary != null && _secondary.IsConnected();
+        /// <summary>
+        /// Offline demo (<c>--demo</c>): both sides report connected and hand out two distinct
+        /// <see cref="ServerConnection"/> objects that were NEVER connected — constructing one
+        /// opens no socket (verified). They exist only so <see cref="DemoDataService"/> can tell
+        /// the two sides apart by reference; every call against them is served from memory.
+        /// </summary>
+        public bool DemoMode { get; private set; }
+
+        public bool IsPrimaryConnected => DemoMode || (_primary != null && _primary.IsConnected());
+        public bool IsSecondaryConnected => DemoMode || (_secondary != null && _secondary.IsConnected());
 
         public ServerConnection Primary => _primary;
         public ServerConnection Secondary => _secondary;
@@ -38,8 +46,25 @@ namespace HistorianSyncTool.Services
         public string PrimaryHostname { get; private set; }
         public string SecondaryHostname { get; private set; }
 
+        /// <summary>
+        /// Switches this service into offline demo mode. Creates the two sentinel connections
+        /// WITHOUT calling Connect(), so no network traffic of any kind is produced.
+        /// </summary>
+        public void EnableDemoMode(string primaryHost, string secondaryHost)
+        {
+            DisconnectPrimary();
+            DisconnectSecondary();
+            var props = new ConnectionProperties { ServerHostName = "DEMO" };
+            _primary   = new ServerConnection(props);   // never connected — sentinel only
+            _secondary = new ServerConnection(props);
+            PrimaryHostname   = primaryHost;
+            SecondaryHostname = secondaryHost;
+            DemoMode = true;
+        }
+
         public void ConnectPrimary(string hostInput)
         {
+            if (DemoMode) return;   // demo sessions never open a real connection
             if (string.IsNullOrWhiteSpace(hostInput))
                 throw new ArgumentException("Hostname cannot be empty.", nameof(hostInput));
             DisconnectPrimary();
@@ -49,6 +74,7 @@ namespace HistorianSyncTool.Services
 
         public void ConnectSecondary(string hostInput)
         {
+            if (DemoMode) return;   // demo sessions never open a real connection
             if (string.IsNullOrWhiteSpace(hostInput))
                 throw new ArgumentException("Hostname cannot be empty.", nameof(hostInput));
             DisconnectSecondary();

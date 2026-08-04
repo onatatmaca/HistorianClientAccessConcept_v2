@@ -83,6 +83,7 @@
       <DesignTimeSharedInput>True</DesignTimeSharedInput>
     </Compile>
     <Compile Include="Services\BackfillJournalService.cs" />
+    <Compile Include="Services\DemoDataService.cs" />
     <Compile Include="Services\GapAnalysisService.cs" />
     <Compile Include="Services\HistorianConnectionService.cs" />
     <Compile Include="Services\HistorianDataService.cs" />
@@ -92,10 +93,12 @@
     <Compile Include="Services\RetryHelper.cs" />
     <Compile Include="Services\SampleBucketer.cs" />
     <Compile Include="Services\SampleFilter.cs" />
+    <Compile Include="Services\ServerNaming.cs" />
     <Compile Include="Services\ScheduleLogger.cs" />
     <Compile Include="Services\ScheduleService.cs" />
     <Compile Include="Services\SyncPlanner.cs" />
     <Compile Include="UI\AppTheme.cs" />
+    <Compile Include="UI\Loc.cs" />
     <Compile Include="UI\Controls\CollapsiblePanel.cs" />
     <Compile Include="UI\Controls\ConnectionDot.cs" />
     <Compile Include="UI\Controls\CoverageBar.cs" />
