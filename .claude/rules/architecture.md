@@ -81,10 +81,6 @@ strips that suffix; otherwise `PC2` is appended.
   the progress dialog's detail line while an operation runs
 - **Do not use WPF.** v1 had dead WPF files (`MainWindow.xaml`, `App.xaml`) — v2 must not include them.
 
-## v1 Problem: Monolithic Main.cs
-In v1, `Main.cs` (1402 lines) mixed UI events, Historian API calls, and domain logic in one class.
-This made the synchronization algorithm untestable without the UI.
-
 ## v2 Target: Service Layer
 Extract these three services from the form class:
 
@@ -126,19 +122,9 @@ and new entries revert identically. `RevertBackfill` re-tags them `Kind=Utc` on 
    the `ServerConnection` (optional app.config login for remote clients)
 3. Status reflected in status bar + log; progress dialog appears if it takes > 400 ms
 
-### Browse Tags
-1. `ITags.Query` with `TagnameMask` filter and `DataType = Float`
-2. Paginated with `PageSize = 100` using `while` loop
-3. Results bound to comboboxes
-
-### Read Samples
-- Interpolated query: `now-10min` to `now`, 10 samples, selected tag
-- Raw query: from `dtStartdate` to now, all samples
-
-### Compare
-1. Raw query both tags from same start date
-2. Align by timestamp into `SortedDictionary<DateTime, CompareRowData>`
-3. Missing side shown as `"missing"` in grid
+### Browse / Read / Compare
+Unchanged since Phase 1 — paginated `ITags.Query` (float only), raw + interpolated reads, and
+timestamp alignment into the two grids. Query patterns: [`historian-api.md`](historian-api.md).
 
 ### Per-Tag Gap Analysis (display only; Phase 9 feeds the SYNC TIMELINE)
 1. `RunGapAnalysis` reads the tag SELECTED per side (`cboPrimary`/`cboSecondary`,
