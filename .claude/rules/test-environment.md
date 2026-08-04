@@ -38,6 +38,30 @@ Objective: import a plant's Historian archive (`.iha`) + config (`.ihc`) so the 
    rejected); `IServer.GetConfiguration().ActualTags` is the quickest success metric (it rises above the
    7 baseline). Data is historical — query the archive's real date range, not `now-10min`.
 
+## Recovering Historian archives from a crashed plant VM (2026-08)
+Plant PCs (Riverbend `CYRISV1`, Driftwood `CYDRSV1`) crashed; we received their VMware VMs
+(~60 GB `.zip` → 120 GB `-flat.vmdk`). Reusable way to pull the archives out WITHOUT booting the VM:
+- **Extract the flat `.vmdk`** (it's the raw disk; needs ~120 GB free), then **read its NTFS with
+  7-Zip** (it has VMDK + NTFS handlers). Disk is GPT; C: = partition `3.Basic data partition.ntfs`;
+  archives are at `\Proficy Historian Data\Archives\`. 7-Zip's CLI only sees partitions (can't nest
+  into the NTFS) → use **7-Zip File Manager (GUI, no admin)** to extract just that folder.
+- **7-Zip without admin/UAC**: `msiexec /a 7z*.msi /qn TARGETDIR=<dir>` unpacks `7z.exe`/`7z.dll`/
+  `7zFM.exe` (the normal installer needs elevation; the admin-extract does not).
+- **Real vs empty archive** = byte-scan non-zero %: a healthy archive is ≈ 50-80% non-zero; a file
+  recovered off a DAMAGED disk comes back ≈ 0.00% (dir entry + size recovered, data clusters lost →
+  zero-filled, and NOT sparse). Round size (500,000,000) = pre-allocated/active; non-round = closed
+  (but can STILL be empty if the disk recovery failed).
+- **Validate headlessly**: `ihArchiveDefrag_x64.exe -y -v <src> <dest> [cfg.ihc]` reads + CRC-verifies
+  every tag → `Verification Done (Success) (Examined N values, M tags)`. Per-tag `Failed to defrag /
+  DataNode invalid (CRC)` = corrupt or a non-archive format (e.g. a SCADA store-and-forward buffer).
+  It OVERWRITES the passed `.ihc` with a generated minimal one — keep a copy of the real config.
+- MigrateIHA is GUI-only (both x86 AND x64 are MFC apps, no CLI). Collector `.msq` store-and-forward
+  buffers are pre-allocated zeros (no data). A truncated backup `.zip` can be partly salvaged by
+  scanning local headers + inflating, but a corrupt deflate stream stops early.
+- **Outcome**: Riverbend archives were all zero-filled = unrecoverable (recovered off a damaged disk);
+  Driftwood archives were intact (`User_005` = 133 tags / 65.9M values, CRC-verified; ~419 tags,
+  ~2025 → Jul 2026). Full per-file results in agent memory `project_riverbend_recovery`.
+
 ## Genthin data — LOADED ✅ (migration completed 2026-07-02, 0 errors)
 - **TESTSV1**: 51 465 860 samples, 72 Genthin tags (79 total incl. sim). Range
   **2024-05-02 → 2026-05-28**.

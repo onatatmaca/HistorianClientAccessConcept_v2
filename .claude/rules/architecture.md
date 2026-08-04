@@ -13,6 +13,21 @@ Both are `ServerConnection` objects. Most operations require both to be connecte
 hostname is derived from the primary at startup: if the primary ends with `PC2`, the secondary
 strips that suffix; otherwise `PC2` is appended.
 
+## Centre = two cards: overview ⇄ one point (Phase 12b/12c)
+- **Card 1, the landing screen** — every shared measurement point, one row each, both servers'
+  completeness bars on a shared axis, worst first. Built by `Services/CoverageScanner` on top of
+  `HistorianDataService.ReadBucketCounts` (`CalculatedQuery(Count)`: per-bucket sample counts for
+  many points in ONE round-trip). Hard 10 s budget; unreached points stay "not checked yet" with
+  a *Check the rest* button — never silently truncated.
+- **Card 2, one point** — the zoomable `GapTimeline`, the `ValueChart` (both servers overlaid,
+  missing periods shaded), and the two scrollable data tables. `‹ All measurement points` returns.
+- **Estimate vs exact — do not blur this.** The overview is an ESTIMATE: a bucket counts as
+  "has data" from a single reading, and one-sided buckets are an OUTAGE-level figure. Opening a
+  point recomputes with `SyncPlanner`. Everything a restore writes still comes from `SyncPlanner`
+  alone; the scan never feeds a write path. Every estimate on screen is marked "~".
+- The right-hand panel always belongs to the visible card (list totals vs that point's exact
+  numbers) — `ShowOverview`/`RunGapAnalysis` each refresh it.
+
 ## View modes, language and demo mode (Phase 12a)
 - **Simple is the product, Advanced only ADDS.** `Settings.AdvancedMode` (default off) toggles
   the technical surface: filter box, Server statistics, point link + mirror selector, activity

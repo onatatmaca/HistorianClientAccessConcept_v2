@@ -199,6 +199,89 @@ namespace HistorianSyncTool.Services
             }, _maxRetries);
         }
 
+        /// <summary>
+        /// Per-bucket RAW SAMPLE COUNTS for many tags in one round-trip — the cheap read that
+        /// makes an all-points overview possible.
+        ///
+        /// The window is split into <paramref name="buckets"/> equal intervals and the server
+        /// returns how many raw samples fall in each (<c>CalculationModeType.Count</c>), instead
+        /// of shipping millions of timestamps we would only count anyway. Result: tag → counts,
+        /// one entry per bucket.
+        ///
+        /// This is an ESTIMATE surface only. A bucket with at least one sample counts as
+        /// "has data" regardless of the tag's cadence, so it can never be the basis for a write —
+        /// <see cref="SyncPlanner"/> stays the only thing that decides what a restore copies.
+        ///
+        /// Buckets are filled by the returned TIMESTAMP, not by index: it must not matter
+        /// whether the server returns exactly <paramref name="buckets"/> intervals.
+        /// </summary>
+        public virtual Dictionary<string, int[]> ReadBucketCounts(
+            ServerConnection conn, IList<string> tagNames, DateTime from, DateTime to, int buckets)
+        {
+            var result = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+            if (tagNames == null || tagNames.Count == 0 || buckets < 1) return result;
+
+            DateTime fromUtc = ToApi(from), toUtc = ToApi(to);
+            long span = (toUtc - fromUtc).Ticks;
+            if (span <= 0) return result;
+            long bucketTicks = Math.Max(1, span / buckets);
+
+            foreach (var t in tagNames) result[t] = new int[buckets];
+
+            RetryHelper.Retry<object>(() =>
+            {
+                DataQueryParams query = new CalculatedQuery(
+                    DataCriteria.CalculationModeType.Count, tagNames.ToArray())
+                {
+                    Fields = DataFields.Time | DataFields.Value
+                };
+                query.Criteria.Start           = fromUtc;
+                query.Criteria.End             = toUtc;
+                query.Criteria.NumberOfSamples = (uint)buckets;
+
+                ItemErrors errors;
+                Proficy.Historian.ClientAccess.API.DataSet set;
+                bool more = conn.IData.Query(ref query, out set, out errors);
+                ThrowOnItemErrors(errors, string.Join(",", tagNames));
+                while (more)   // drain: never abandon a paged query (leaks a server-side cursor)
+                {
+                    Proficy.Historian.ClientAccess.API.DataSet page;
+                    more = conn.IData.Query(ref query, out page, out errors);
+                    ThrowOnItemErrors(errors, string.Join(",", tagNames));
+                    if (page != null) set.AddRange(page);
+                }
+                if (set == null) return null;
+
+                foreach (var tag in tagNames)
+                {
+                    if (!set.ContainsKey(tag)) continue;
+                    var samples = set[tag];
+                    int[] counts = result[tag];
+                    int n = samples.Count();
+                    for (int i = 0; i < n; i++)
+                    {
+                        object v = samples.GetValue(i);
+                        if (v == null) continue;
+                        double c;
+                        if (!double.TryParse(Convert.ToString(v,
+                                System.Globalization.CultureInfo.InvariantCulture),
+                                System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out c))
+                            continue;
+                        if (c <= 0) continue;
+
+                        int idx = (int)((samples.GetTime(i).Ticks - fromUtc.Ticks) / bucketTicks);
+                        if (idx < 0) idx = 0;
+                        if (idx >= buckets) idx = buckets - 1;
+                        counts[idx] += (int)Math.Round(c);
+                    }
+                }
+                return null;
+            }, _maxRetries);
+
+            return result;
+        }
+
         // ── Data Writes ────────────────────────────────────────────────────────────
 
         public virtual List<string> WriteFloatSamples(

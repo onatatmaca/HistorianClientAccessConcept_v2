@@ -80,3 +80,33 @@ Split out of [`roadmap.md`](roadmap.md) once it passed the 200-line budget. Curr
 > window `[DateTime.Now - H, DateTime.Now]` mixed local wall-clock with the API's UTC frame,
 > so at H ≤ 2 h it silently evaluated the future and backfilled nothing. Fixed by the
 > API-boundary conversion; see [`known-issues.md`](known-issues.md).
+
+---
+
+## Phase 8 — UX polish & backfill safety
+- [x] Searchable tag dropdowns — `cboPrimary`/`cboSecondary` are editable
+      `DropDown` + `AutoCompleteMode.SuggestAppend` with a CustomSource rebuilt
+      from browsed names; type to filter hundreds of tags
+- [x] Removed the "WRITE DATA | MULTIFIELD TAGS" section (manual single-sample
+      entry is useless at BGA scale). `HistorianDataService` write methods kept.
+- [x] **Revert / undo backfill**: every run journals the exact (tag, timestamp)
+      pairs it wrote+verified to `logs/backfill-journal/{id}.json`. New
+      `BackfillHistoryDialog` (opened via "Backfill History…" in the BACKFILL
+      group) lists past runs; reverting deletes exactly those timestamps via
+      `IData.Delete` so pre-existing data is never touched.
+  - Double-guarded: red revert button disabled until an "Enable revert"
+    checkbox is ticked AND a final confirm dialog (defaults to No) is accepted
+  - Target matched by recorded hostname; must be connected. Entry marked
+    `Reverted` only on a fully clean pass — errors keep it Active for safe retry
+- [x] Scheduler optional manual tag multiselect — `SchedulerSettingsDialog` adds
+      a "specific tags" mode (CheckedListBox of shared tags) alongside the mask;
+      persisted via `ScheduleUseTagList` + `ScheduleTagList`
+- [x] Combined bidirectional Preview window — `BidirectionalBackfillDialog`: P→S and
+      S→P checklists side by side, per-tag "Will copy" via whole-second diff, single
+      combined report after running both directions
+- [x] Clearer gap/tag table — right-panel table is now the cross-server diff per
+      direction ("Missing on / Count / Period" + full-sentence tooltips; Phase 9 added
+      click-to-zoom)
+- [ ] System tray icon (still deferred)
+
+---

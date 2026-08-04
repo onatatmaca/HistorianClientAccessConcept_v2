@@ -102,8 +102,14 @@ bool exists = result != null && result.Count > 0;
    `new DateTime(lastTs.Ticks + 1)` **DROPS the Kind** → every chunk re-reads ~1–2 h → duplicate,
    non-monotonic output. (The app is correct; several throwaway tools were not.)
 4. **Never compare/mix `DateTime.Now` or picker values with API times** — .NET compares raw Ticks
-   and ignores `Kind`, so the result is silently off by 1–2 h. Use `DateTime.UtcNow` for anything
-   measured against sample times (live-edge clamp, scheduler window, presets).
+   and ignores `Kind`, so the result is silently off by 1–2 h. In this app that is already handled:
+   `HistorianDataService` converts at the boundary and everything above it is LOCAL, so plain
+   `DateTime.Now` is correct. Do not add conversions elsewhere.
+5. **A read must never look like "no data" when it failed.** Reads check `ItemErrors` and throw
+   (`ThrowOnItemErrors`) so `RetryHelper` retries. An errored, silently-empty TARGET read would make
+   `SyncPlanner` fall back to exact-diff, mass-copy, journal it — and a later revert would delete
+   pre-existing samples. Verified live: an empty window **and** a nonexistent tag both return
+   `ItemErrors=0`, so this never fires on the normal "no data here" case.
 
 ## Data Queries
 

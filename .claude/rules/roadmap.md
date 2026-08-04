@@ -11,39 +11,12 @@ description: Phase completion status and next items for v2 development
 
 ---
 
-## Phases 1-7 - complete (archived)
+## Phases 1-8 - complete (archived)
 Moved to [`roadmap-archive.md`](roadmap-archive.md) to keep this file under 200 lines:
 P1 service layer, P2 selective sync, P3 read-after-write verify, P4 tests, P5 HistSync-as-master
-+ multi-tag backfill, P6 polish/interactivity/transparency, P7 scheduling.
++ multi-tag backfill, P6 polish/interactivity/transparency, P7 scheduling, P8 UX polish +
+revert/undo + bidirectional preview.
 Still open there: integration test harness (optional), system tray icon (deferred).
-
----
-
-## Phase 8 — UX polish & backfill safety
-- [x] Searchable tag dropdowns — `cboPrimary`/`cboSecondary` are editable
-      `DropDown` + `AutoCompleteMode.SuggestAppend` with a CustomSource rebuilt
-      from browsed names; type to filter hundreds of tags
-- [x] Removed the "WRITE DATA | MULTIFIELD TAGS" section (manual single-sample
-      entry is useless at BGA scale). `HistorianDataService` write methods kept.
-- [x] **Revert / undo backfill**: every run journals the exact (tag, timestamp)
-      pairs it wrote+verified to `logs/backfill-journal/{id}.json`. New
-      `BackfillHistoryDialog` (opened via "Backfill History…" in the BACKFILL
-      group) lists past runs; reverting deletes exactly those timestamps via
-      `IData.Delete` so pre-existing data is never touched.
-  - Double-guarded: red revert button disabled until an "Enable revert"
-    checkbox is ticked AND a final confirm dialog (defaults to No) is accepted
-  - Target matched by recorded hostname; must be connected. Entry marked
-    `Reverted` only on a fully clean pass — errors keep it Active for safe retry
-- [x] Scheduler optional manual tag multiselect — `SchedulerSettingsDialog` adds
-      a "specific tags" mode (CheckedListBox of shared tags) alongside the mask;
-      persisted via `ScheduleUseTagList` + `ScheduleTagList`
-- [x] Combined bidirectional Preview window — `BidirectionalBackfillDialog`: P→S and
-      S→P checklists side by side, per-tag "Will copy" via whole-second diff, single
-      combined report after running both directions
-- [x] Clearer gap/tag table — right-panel table is now the cross-server diff per
-      direction ("Missing on / Count / Period" + full-sentence tooltips; Phase 9 added
-      click-to-zoom)
-- [ ] System tray icon (still deferred)
 
 ---
 
@@ -164,15 +137,37 @@ UI a technician or a manager understands, with the technical surface one switch 
       back to the HistSync tag); table caption too long to render
 - [x] Verified by screenshot: simple/EN, simple/DE, advanced/EN — all against `--demo`
 
-### Phase 12b — all-points overview (next)
-- [ ] `CoverageScanner` via `CalculatedQuery(Count)` — per-bucket counts for many points in one
-      round-trip; ≤10 s budget for all shared points, then a scrollable `TagOverviewList`
-      (both servers' bars per row, worst first, estimate labelled "~")
-- [ ] ⚠ First step is a live probe: `CalculatedQuery`/`Count` is NOT yet proven on these servers
+### Phase 12b — all-points overview ✅
+- [x] **`HistorianDataService.ReadBucketCounts`** — `CalculatedQuery(CalculationModeType.Count)`
+      returns per-bucket raw sample counts for MANY points in one round-trip. Buckets are filled
+      by returned timestamp (not index), pages are drained, times cross via `ToApi`
+- [x] **`Services/CoverageScanner`** — chunks of 20 points × both servers, cancellable, with a
+      **10 s budget**; what it does not reach stays "not checked yet" plus a *Check the rest*
+      button. Never silently truncated
+- [x] **`UI/Controls/TagOverviewList`** — one owner-drawn virtualised list (not 78 child
+      controls): per row the point name, both servers' bars (green/red/grey exactly like the
+      timeline), coverage %, and "~N readings to restore". Worst first; client-side search
+- [x] Landing screen: connect → browse → scan → list. The right panel shows the scan's
+      estimated totals; "Check for missing data" re-scans the list (or re-checks the open point)
+- [x] Estimates are marked as such everywhere. A bucket counts as "has data" from one reading,
+      and one-sided buckets are an OUTAGE-level estimate — measured in demo: overview ~3,038 vs
+      the point's exact 3,421. Opening a point recomputes with `SyncPlanner`, which stays the
+      only thing that decides what a restore writes
+- [ ] ⚠ **Live probe still owed**: `CalculatedQuery`/`Count` is proven only against the demo
+      service. Before trusting it on plant data, verify counts against a raw read for a known
+      window and measure the wall clock for ~78 points × 1 year
 
-### Phase 12c — per-point drill-down (after 12b)
-- [ ] ← Back · big timeline · value curve of both servers overlaid · the two scrollable tables ·
-      exact `SyncPlanner` count for that point
+### Phase 12c — per-point drill-down ✅
+- [x] Centre is a two-card swap: overview ⇄ detail. Detail = "‹ All measurement points" +
+      point name, the existing zoomable timeline, the value chart, and the two scrollable
+      tables exactly as before (kept visible in both view modes — explicitly requested)
+- [x] **`UI/Controls/ValueChart`** — both servers overlaid (main solid, mirror dashed on top so
+      near-identical curves stay distinguishable), missing periods shaded red per server, hover
+      crosshair with both values. Drawn from the SAME samples the tables show, decimated to a
+      min/max envelope per pixel column, and spanning the full width so its time axis lines up
+      with the timeline above it. Custom-drawn — no charting assembly
+- [x] Verified by screenshot against `--demo`: overview EN + DE, drill-down with the chart,
+      Back, and language switching on both cards
 
 ---
 

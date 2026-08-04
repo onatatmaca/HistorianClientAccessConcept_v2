@@ -48,6 +48,7 @@ HistorianClientAccessConcept_v2/
 │                                      BackfillHistoryDialog, ProgressDialog
 ├── Services/                        ← HistorianConnectionService, HistorianDataService,
 │                                      DemoDataService (offline `--demo` pair), ServerNaming,
+│                                      CoverageScanner (all-points overview scan),
 │                                      GapAnalysisService, SyncPlanner (backfill planning:
 │                                      aligned vs independent streams), RetryHelper,
 │                                      SampleFilter, SampleBucketer, IntervalBuilder,
@@ -59,7 +60,9 @@ HistorianClientAccessConcept_v2/
 │                                      BackfillJournalEntry / BackfillJournalTag,
 │                                      TimelineData (TimeRange, TimelineTrackData, CopyableSegment)
 ├── UI/                              ← AppTheme, Loc (all EN/DE strings) + Controls
-│                                      (FlatButton, CoverageBar,
+│                                      (TagOverviewList = all-points landing list,
+│                                      ValueChart = both servers' values overlaid,
+│                                      FlatButton, CoverageBar,
 │                                      GapTimeline, SectionHeader, ConnectionDot,
 │                                      CollapsiblePanel)
 ├── lib/                             ← Local Proficy DLL copy for building WITHOUT the

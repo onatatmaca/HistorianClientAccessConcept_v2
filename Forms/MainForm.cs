@@ -230,6 +230,9 @@ namespace HistorianSyncTool.Forms
             _applyingViewState = false;
             ApplyViewMode();
             ApplyLanguage();
+            ShowOverview();   // the all-points list is the landing screen
+
+            lstOverview.EmptyMessage = Loc.T("ov.empty");
 
             if (_demoMode)
             {
@@ -403,6 +406,198 @@ namespace HistorianSyncTool.Forms
             }
         }
 
+        // ── All-points overview (Phase 12b) ────────────────────────────────────────
+
+        /// <summary>Wall-clock budget for one overview scan. The boss's requirement is that
+        /// the landing screen appears quickly; anything not reached in time is shown as
+        /// "not checked yet" with a button to finish, never silently dropped.</summary>
+        private static readonly TimeSpan ScanBudget = TimeSpan.FromSeconds(10);
+
+        private CoverageScan _lastScan;
+        private string _overviewVerdict = "";
+        private List<string> _scanTags = new List<string>();
+        private bool _showingDetail;
+
+        /// <summary>Shows the all-points list (centre card 1).</summary>
+        private void ShowOverview()
+        {
+            _showingDetail = false;
+            pnlDetail.Visible   = false;
+            pnlOverview.Visible = true;
+            pnlOverview.BringToFront();
+
+            // The right panel belongs to whatever is on screen: coming back from a point it
+            // would otherwise still show that ONE point's numbers next to the full list.
+            if (_lastScan != null)
+            {
+                UpdateOverviewSummary();
+                UpdateOverviewTotals();
+                SetStatus(_overviewVerdict);
+            }
+        }
+
+        /// <summary>Shows one measurement point in detail (centre card 2).</summary>
+        private void ShowDetailCard(string point)
+        {
+            _showingDetail = true;
+            lblDetailPoint.Text = point ?? "";
+            pnlOverview.Visible = false;
+            pnlDetail.Visible   = true;
+            pnlDetail.BringToFront();
+        }
+
+        private void lnkBackToOverview_Click(object sender, EventArgs e)
+        {
+            if (_isBusy) return;
+            ShowOverview();
+        }
+
+        private void txtOverviewSearch_TextChanged(object sender, EventArgs e)
+        {
+            lstOverview.SetFilter(txtOverviewSearch.Text);
+            UpdateOverviewSummary();
+        }
+
+        private async void btnScanRest_Click(object sender, EventArgs e)
+        {
+            // Finish what the budget cut short — same scan, no time limit this time.
+            await ScanOverview(TimeSpan.Zero);
+        }
+
+        private async void lstOverview_PointActivated(string point)
+        {
+            if (_isBusy || string.IsNullOrWhiteSpace(point)) return;
+            await OpenPoint(point);
+        }
+
+        /// <summary>
+        /// Opens one measurement point: selects it on both sides, loads both tables and runs the
+        /// EXACT check (SyncPlanner) for it — the overview only ever showed an estimate.
+        /// </summary>
+        private async Task OpenPoint(string point)
+        {
+            _pointPrimary = point;
+            SyncCombo(cboPrimary, point);
+            if (_tagLinkEnabled) TryMirrorTagSelection(cboPrimary, cboSecondary);
+            else { _pointSecondary = point; SyncCombo(cboSecondary, point); }
+
+            ShowDetailCard(point);
+            await ShowSelectedPoint();
+        }
+
+        /// <summary>
+        /// Scans every shared measurement point and fills the overview list.
+        /// </summary>
+        /// <param name="budget">Time limit; <see cref="TimeSpan.Zero"/> means "no limit"
+        /// (used by "Check the rest").</param>
+        private async Task ScanOverview(TimeSpan? budget = null)
+        {
+            if (!_connections.IsPrimaryConnected && !_connections.IsSecondaryConnected)
+            { lstOverview.Clear(Loc.T("ov.empty")); return; }
+
+            DateTime from = dtpStart.Value, to = dtpEnd.Value;
+            if (from >= to) { SetStatus(Loc.T("msg.dateOrder"), true); return; }
+
+            // Points that exist on BOTH servers — the overview is about comparing them.
+            if (_scanTags.Count == 0)
+            {
+                var pri = new HashSet<string>(_browsedPrimaryTags, StringComparer.OrdinalIgnoreCase);
+                _scanTags = _browsedSecondaryTags.Where(t => pri.Contains(t))
+                                                 .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+                                                 .ToList();
+                if (_scanTags.Count == 0)   // nothing shared: still show what the main server has
+                    _scanTags = _browsedPrimaryTags.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            if (_scanTags.Count == 0) { lstOverview.Clear(Loc.T("msg.noShared")); return; }
+
+            // One bucket per horizontal pixel at most — finer would be invisible and slower.
+            int buckets = Math.Max(120, Math.Min(600, lstOverview.Width - 160));
+            TimeSpan limit = budget ?? ScanBudget;
+
+            SetBusy(true, Loc.T("hdr.overview"));
+            SetStatus(Loc.F("ov.scanning", 0, _scanTags.Count));
+            var conns = new { Main = _connections.Primary, Mirror = _connections.Secondary };
+
+            try
+            {
+                ResetCts();
+                var token = _cts.Token;
+                var tags  = _scanTags;
+
+                var scan = await Task.Run(() => CoverageScanner.Scan(
+                    _data, conns.Main, conns.Mirror, tags, from, to, buckets, limit, token,
+                    (done, total) => SetPhaseProgress(done, total, Loc.F("ov.scanning", done, total))),
+                    token);
+
+                _lastScan = scan;
+                lstOverview.SetData(scan.Points);
+                UpdateOverviewSummary();
+                UpdateOverviewTotals();
+                SetStatus(_overviewVerdict);   // one verdict, never two different ones
+            }
+            catch (OperationCanceledException) { SetStatus(Loc.T("msg.checkCancelled")); }
+            catch (Exception ex) { SetStatus(Loc.F("msg.checkFailed", ex.Message), true); }
+            finally { SetBusy(false); }
+        }
+
+        private void UpdateOverviewSummary()
+        {
+            if (_lastScan == null)
+            {
+                lblOverviewSummary.Text = "";
+                btnScanRest.Visible = false;
+                return;
+            }
+
+            int needAttention = _lastScan.Points.Count(p => p.Scanned && p.Error == null && !p.InSync);
+            _overviewVerdict = needAttention == 0
+                ? Loc.F("ov.summaryAllOk", _lastScan.Points.Count, _lastScan.Seconds)
+                : Loc.F("ov.summary", _lastScan.Points.Count, needAttention, _lastScan.Seconds);
+            // The estimate caveat belongs above the list, where there is room; the status bar
+            // gets the verdict alone so it stays on one line.
+            lblOverviewSummary.Text = _overviewVerdict + "   ·   " + Loc.T("ov.estimateNote");
+
+            // Honest about what was left out, with the way to finish it.
+            btnScanRest.Visible = _lastScan.Truncated;
+            if (_lastScan.Truncated)
+            {
+                _overviewVerdict = Loc.F("ov.truncated",
+                    _lastScan.ScannedCount, _lastScan.Points.Count);
+                lblOverviewSummary.Text = _overviewVerdict;
+            }
+        }
+
+        /// <summary>
+        /// Fills the right-hand "what's missing" panel from the scan while the overview is up.
+        /// Without this it kept telling the user to press a button they had already pressed.
+        /// The figures are the scan's ESTIMATE and are marked as such — opening a point
+        /// replaces them with the exact SyncPlanner numbers.
+        /// </summary>
+        private void UpdateOverviewTotals()
+        {
+            if (_lastScan == null) return;
+
+            int toMirror = _lastScan.Points.Where(p => p.Scanned && p.Error == null).Sum(p => p.EstMissingOnMirror);
+            int toMain   = _lastScan.Points.Where(p => p.Scanned && p.Error == null).Sum(p => p.EstMissingOnMain);
+
+            _lastDiffRows = new List<DiffSummaryRow>();
+            gridGaps.Rows.Clear();
+            lblDiffHint.Visible = false;
+            _hasAnalysis = true;
+
+            if (toMirror == 0 && toMain == 0)
+            {
+                lblGapSummary.Text      = Loc.T("missing.inSync");
+                lblGapSummary.ForeColor = AppTheme.Success;
+            }
+            else
+            {
+                lblGapSummary.Text      = Loc.F("missing.summaryEst",
+                                              toMirror.ToString("N0"), toMain.ToString("N0"));
+                lblGapSummary.ForeColor = AppTheme.Danger;
+            }
+        }
+
         // ── Language ───────────────────────────────────────────────────────────────
 
         private void SetLanguage(AppLanguage lang)
@@ -437,11 +632,21 @@ namespace HistorianSyncTool.Forms
             RebuildGridRowsForViewMode();
             timeline.Invalidate();
 
-            // The timeline track captions, the strip note and the status line are produced
-            // DURING an analysis, so they would keep the previous language until the next
-            // run. Re-run it once (only when a result is already on screen) so the whole
-            // window is in one language — switching is a rare, deliberate action.
-            if (_hasAnalysis && !_isBusy && dtpStart.Value < dtpEnd.Value)
+            // Text produced DURING a run (timeline captions, the strip note, the summaries)
+            // would otherwise keep the previous language. Refresh whatever is on screen —
+            // and only that: re-running the point analysis while the overview is showing
+            // would replace the list's totals with one point's numbers.
+            if (!_showingDetail)
+            {
+                lstOverview.Invalidate();     // row text is drawn through Loc at paint time
+                if (_lastScan != null)
+                {
+                    UpdateOverviewSummary();
+                    UpdateOverviewTotals();
+                    SetStatus(_overviewVerdict);
+                }
+            }
+            else if (_hasAnalysis && !_isBusy && dtpStart.Value < dtpEnd.Value)
             {
                 var again = RunGapAnalysis(dtpStart.Value, dtpEnd.Value);
                 GC.KeepAlive(again);
@@ -678,18 +883,12 @@ namespace HistorianSyncTool.Forms
                 await ConnectAsync();
             }
 
-            // Connected (or in demo): load the points and show a result straight away, so the
-            // window is never a blank form. Phase 12b replaces this with the all-points
-            // overview; until then it opens on the first point.
+            // Connected (or in demo): load the points and open on the all-points overview,
+            // so the window is never a blank form and the worst point is already on top.
             if (_connections.IsPrimaryConnected)
             {
                 await BrowseTagsAsync();
-                if (cboPrimary.Items.Count > 0)
-                {
-                    // Binding the DataSource already leaves index 0 selected, so assigning it
-                    // again raises no event — run the read + check chain explicitly.
-                    await ShowSelectedPoint();
-                }
+                await ScanOverview();
             }
 
             await TryRunScheduledOnStartup();
@@ -1103,6 +1302,7 @@ namespace HistorianSyncTool.Forms
                 // Remember names so the scheduler dialog can offer a tag multiselect.
                 if (priTags != null) _browsedPrimaryTags   = priTags.Select(t => t.Name).ToArray();
                 if (secTags != null) _browsedSecondaryTags = secTags.Select(t => t.Name).ToArray();
+                _scanTags.Clear();   // the overview's point list is derived from this browse
 
                 // Binding a DataSource selects item 0 without raising SelectedIndexChanged for
                 // a control that has no handle yet, so seed the explicit selection here: keep
@@ -2398,6 +2598,14 @@ namespace HistorianSyncTool.Forms
             DateTime to   = dtpEnd.Value;
             if (from >= to) { SetStatus(Loc.T("msg.dateOrder"), true); return; }
 
+            // The button means "check the thing I am looking at": the whole list on the
+            // overview, this one point in the detail view.
+            if (!_showingDetail)
+            {
+                await ScanOverview();
+                return;
+            }
+
             await RunGapAnalysis(from, to);
             // Explicit analyze click → also refresh any loaded data tables for the new range
             await RefreshLoadedGrids();
@@ -2584,9 +2792,17 @@ namespace HistorianSyncTool.Forms
                 _lastSecondaryResult = secResult;
                 _lastDiffRows        = diffRows ?? new List<DiffSummaryRow>();
 
-                var priTrack = BuildTrack(priResult, "PRIMARY", priHost, priFeasKnown, priFill, priUnfill, priBack);
-                var secTrack = BuildTrack(secResult, "SECONDARY", secHost, secFeasKnown, secFill, secUnfill, secBack);
+                var priTrack = BuildTrack(priResult, ServerNaming.PrimaryLabel, priHost, priFeasKnown, priFill, priUnfill, priBack);
+                var secTrack = BuildTrack(secResult, ServerNaming.SecondaryLabel, secHost, secFeasKnown, secFill, secUnfill, secBack);
                 UpdateGapAnalysisUI(from, to, priTrack, secTrack, copyable, stripNote);
+
+                // The value curve is drawn from the SAME samples the tables below are showing
+                // (loaded by ReadPrimaryData / ReadSecondaryData), so the graph and the table
+                // can never disagree. Missing periods are shaded from this same analysis.
+                chart.SetData(from, to, _rawPrimarySamples, _rawSecondarySamples,
+                    priFill.Concat(priUnfill).ToList(), secFill.Concat(secUnfill).ToList(),
+                    ServerNaming.Short(ServerNaming.PrimaryLabel, priHost),
+                    ServerNaming.Short(ServerNaming.SecondaryLabel, secHost));
 
                 int totalGaps = (_lastPrimaryResult?.Gaps.Count ?? 0)
                               + (_lastSecondaryResult?.Gaps.Count ?? 0);
@@ -2627,6 +2843,15 @@ namespace HistorianSyncTool.Forms
             if (from >= to) return;
 
             SetStatus(Loc.T("msg.refreshing"));
+
+            // Refresh whichever card the user is on, so the restored data is visible
+            // immediately: the whole list on the overview, this point in the detail view.
+            if (!_showingDetail)
+            {
+                await ScanOverview();
+                return;
+            }
+
             await RunGapAnalysis(from, to);
             await RefreshLoadedGrids();
         }

@@ -1,5 +1,6 @@
 using HistorianSyncTool.UI;
 using HistorianSyncTool.UI.Controls;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -85,6 +86,25 @@ namespace HistorianSyncTool.Forms
         private Label          lblDiffHint;
         private System.Windows.Forms.DataGridView gridGaps;
         private FlatButton     btnBackfillPreview;
+
+        // Center card 1 — all-points overview (the landing screen)
+        private Panel          pnlOverview;
+        private SectionHeader  hdrOverview;
+        private TextBox        txtOverviewSearch;
+        private Label          lblOverviewSummary;
+        private FlatButton     btnScanRest;
+        private TagOverviewList lstOverview;
+
+        // Center card 2 — one measurement point in detail
+        private Panel          pnlDetail;
+        private Panel          pnlDetailHeader;
+        private LinkLabel      lnkBackToOverview;
+        private Label          lblDetailPoint;
+
+        // Center — measured values of the open point, both servers overlaid
+        private Panel          pnlChart;
+        private SectionHeader  hdrChart;
+        private ValueChart     chart;
 
         // Center — sync timeline (both servers on one shared time axis)
         private Panel          pnlTimeline;
@@ -747,10 +767,107 @@ namespace HistorianSyncTool.Forms
             pnlTimeline.Controls.Add(pnlTimelineWrap);  // Fill
             pnlTimeline.Controls.Add(hdrTimeline);      // Top
 
-            // Assemble center (Fill first, then edge-docked panels)
-            pnlCenter.Controls.Add(pnlGrids);    // Fill
+            // ══════════════════════════════════════════════════════════════════════
+            // CENTRE CARD 2 — one point in detail (timeline + the two data tables).
+            // Exactly what the centre used to be, now behind a "‹ All measurement
+            // points" header so it can be swapped with the overview.
+            // ══════════════════════════════════════════════════════════════════════
+            pnlDetailHeader = new Panel
+            {
+                Dock = DockStyle.Top, Height = 28, BackColor = AppTheme.Background,
+                Padding = new Padding(4, 2, 4, 2)
+            };
+            lnkBackToOverview = new LinkLabel
+            {
+                Dock            = DockStyle.Left,
+                Width           = 190,
+                Font            = AppTheme.Bold,
+                LinkColor       = AppTheme.Navy,
+                ActiveLinkColor = AppTheme.Teal,
+                LinkBehavior    = LinkBehavior.HoverUnderline,
+                TextAlign       = ContentAlignment.MiddleLeft,
+                Cursor          = Cursors.Hand
+            };
+            lnkBackToOverview.Click += lnkBackToOverview_Click;
+            lblDetailPoint = new Label
+            {
+                Dock = DockStyle.Fill, Font = AppTheme.Bold, ForeColor = AppTheme.TextPrimary,
+                TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true
+            };
+            pnlDetailHeader.Controls.Add(lblDetailPoint);
+            pnlDetailHeader.Controls.Add(lnkBackToOverview);
+
+            // Measured values of this point from both servers, under the completeness bars
+            // and above the tables — same time axis, same samples as the tables.
+            pnlChart = new Panel
+            {
+                Dock = DockStyle.Top, Height = 168, BackColor = AppTheme.Surface,
+                Padding = new Padding(10, 4, 10, 6)
+            };
+            hdrChart = new SectionHeader { Text = "", Dock = DockStyle.Top };
+            chart = new ValueChart { Dock = DockStyle.Fill };
+            var pnlChartWrap = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Surface };
+            pnlChartWrap.Controls.Add(chart);
+            pnlChart.Controls.Add(pnlChartWrap);
+            pnlChart.Controls.Add(hdrChart);
+
+            pnlDetail = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background };
+            pnlDetail.Controls.Add(pnlGrids);        // Fill
+            pnlDetail.Controls.Add(pnlChart);        // Top
+            pnlDetail.Controls.Add(pnlTimeline);     // Top
+            pnlDetail.Controls.Add(pnlDetailHeader); // Top (outermost = above everything)
+
+            // ══════════════════════════════════════════════════════════════════════
+            // CENTRE CARD 1 — all measurement points at a glance (landing screen)
+            // ══════════════════════════════════════════════════════════════════════
+            pnlOverview = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Surface };
+            hdrOverview = new SectionHeader { Text = "", Dock = DockStyle.Top };
+
+            var pnlOverviewTop = new Panel
+            {
+                Dock = DockStyle.Top, Height = 62, BackColor = AppTheme.Surface,
+                Padding = new Padding(10, 8, 10, 4)
+            };
+            txtOverviewSearch = new TextBox
+            {
+                Dock = DockStyle.Top, Font = AppTheme.Default, BorderStyle = BorderStyle.FixedSingle
+            };
+            txtOverviewSearch.TextChanged += txtOverviewSearch_TextChanged;
+
+            lblOverviewSummary = new Label
+            {
+                Dock = DockStyle.Bottom, Height = 20, Font = AppTheme.Small,
+                ForeColor = AppTheme.TextSecondary, TextAlign = ContentAlignment.MiddleLeft
+            };
+            btnScanRest = new FlatButton
+            {
+                Text = "", ButtonStyle = FlatButtonStyle.Secondary,
+                Dock = DockStyle.Right, Width = 130, Visible = false
+            };
+            btnScanRest.Click += btnScanRest_Click;
+
+            var pnlSummaryRow = new Panel { Dock = DockStyle.Bottom, Height = 24, BackColor = AppTheme.Surface };
+            pnlSummaryRow.Controls.Add(lblOverviewSummary);
+            pnlSummaryRow.Controls.Add(btnScanRest);
+
+            pnlOverviewTop.Controls.Add(pnlSummaryRow);
+            pnlOverviewTop.Controls.Add(txtOverviewSearch);
+
+            lstOverview = new TagOverviewList { Dock = DockStyle.Fill };
+            lstOverview.PointActivated += lstOverview_PointActivated;
+
+            var pnlOverviewWrap = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6, 0, 6, 6), BackColor = AppTheme.Surface };
+            pnlOverviewWrap.Controls.Add(lstOverview);
+
+            pnlOverview.Controls.Add(pnlOverviewWrap);  // Fill
+            pnlOverview.Controls.Add(pnlOverviewTop);   // Top
+            pnlOverview.Controls.Add(hdrOverview);      // Top (outermost)
+
+            // Assemble center (Fill first, then edge-docked panels). Both cards are Fill;
+            // exactly one is visible at a time — see MainForm.ShowOverview/ShowDetail.
+            pnlCenter.Controls.Add(pnlDetail);   // Fill
+            pnlCenter.Controls.Add(pnlOverview); // Fill
             pnlCenter.Controls.Add(pnlLog);      // Bottom (outermost)
-            pnlCenter.Controls.Add(pnlTimeline); // Top
 
             // ══════════════════════════════════════════════════════════════════════
             // Add to form. Later-added docks OUTERMOST, so the header strip must come
@@ -812,6 +929,16 @@ namespace HistorianSyncTool.Forms
             btnCopyLog.Text      = Loc.T("btn.copyLog");
             btnReadPrimary.Text  = Loc.T("btn.readPrimary");
             btnReadSecondary.Text= Loc.T("btn.readSecondary");
+
+            hdrChart.Text             = Loc.T("hdr.values");
+            chart.SetEmptyMessage(Loc.T("chart.empty"));
+
+            hdrOverview.Text          = Loc.T("hdr.overview");
+            lnkBackToOverview.Text    = Loc.T("ov.back");
+            btnScanRest.Text          = Loc.T("ov.scanRest");
+            lstOverview.EmptyMessage  = Loc.T("ov.empty");
+            SetCueBanner(txtOverviewSearch, Loc.T("ov.search"));
+            lstOverview.Invalidate();
 
             hdrView.Text         = Loc.T("hdr.view");
             hdrBackfill.Text     = Loc.T("hdr.repair");
@@ -1012,6 +1139,24 @@ namespace HistorianSyncTool.Forms
             BackColor = AppTheme.Background,
             Tag = owner
         };
+
+        /// <summary>
+        /// Grey in-box hint ("Search…") that disappears as soon as the user types.
+        /// .NET Framework 4.8's TextBox has no PlaceholderText, so this uses the Win32
+        /// cue-banner message; it needs a created handle, hence the deferred hook-up.
+        /// </summary>
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+        private static void SetCueBanner(TextBox box, string hint)
+        {
+            const int EM_SETCUEBANNER = 0x1501;
+            if (box == null) return;
+            if (box.IsHandleCreated) { SendMessage(box.Handle, EM_SETCUEBANNER, (IntPtr)1, hint ?? ""); return; }
+            EventHandler once = null;
+            once = (s, e) => { box.HandleCreated -= once; SendMessage(box.Handle, EM_SETCUEBANNER, (IntPtr)1, hint ?? ""); };
+            box.HandleCreated += once;
+        }
 
         /// <summary>EN / DE switch in the header strip.</summary>
         private static LinkLabel MakeLangLink(string text) => new LinkLabel

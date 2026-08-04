@@ -121,11 +121,17 @@ for each tag:
 The activity log names the mode per tag ("aligned streams — exact diff" / "N target
 outage(s), gap rule 1h 0m").
 
+**Every time in this file is LOCAL** (Phase 11): `now` is `DateTime.Now`, `evalFrom/evalTo`
+come from the date pickers, and `ReadRawInRange`/`WriteFloatSamplesWithQuality` convert to
+the API's UTC frame internally. Do not add a conversion in any of these paths — see
+[`architecture.md`](architecture.md). (Journal ticks are the one exception: UTC.)
+
 **Live-edge guard**: on live servers the collectors are still writing near "now", so
 diffing up to now reports in-flight samples as missing on every run — an endless
 backfill. Every write path clamps the evaluation end (ExecuteBackfill itself, both
 Copy buttons, Preview & Backfill, scheduled runs) so preview counts match what is
-written. Analysis display is NOT clamped.
+written. Analysis display is NOT clamped. Before Phase 11 this guard was **inert** in any
+non-UTC timezone (local `now` vs UTC sample times); the boundary fix made it real.
 
 **Cancel mid-run** (via the progress dialog): stops at the current batch, journals
 what was written, then asks *keep* (default; revertable later) or *revert now*.

@@ -171,6 +171,72 @@ namespace HistorianSyncTool.Services
             return result;
         }
 
+        /// <summary>
+        /// Demo equivalent of the server-side Count calculation: walks each tag's cadence grid
+        /// and counts per bucket without materialising the samples, so scanning ~78 points stays
+        /// instant on x86.
+        /// </summary>
+        public override Dictionary<string, int[]> ReadBucketCounts(
+            ServerConnection conn, IList<string> tagNames, DateTime from, DateTime to, int buckets)
+        {
+            var result = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+            if (tagNames == null || tagNames.Count == 0 || buckets < 1) return result;
+
+            bool main = IsMain(conn);
+            DateTime lo = Local(from) < _dataStart ? _dataStart : Local(from);
+            DateTime hi = Local(to)   > _dataEnd   ? _dataEnd   : Local(to);
+            long span = (hi - lo).Ticks;
+
+            foreach (var name in tagNames)
+            {
+                var counts = new int[buckets];
+                result[name] = counts;
+                if (span <= 0) continue;
+
+                var tag = Find(name);
+                if (tag == null || (!main && !tag.OnMirror)) continue;
+
+                long bucketTicks = Math.Max(1, span / buckets);
+                int offset = (!main && tag.Independent) ? 3 + (Hash(name) % 40) : 0;
+                var outages = tag.Outages
+                    .Where(o => o.OnMirror != main)
+                    .Select(o => (Start: _dataEnd.AddDays(-o.DaysBack),
+                                  End:   _dataEnd.AddDays(-o.DaysBack).AddHours(o.Hours)))
+                    .ToList();
+                var gone = DeletedSet(main, name);
+
+                long stepTicks = TimeSpan.TicksPerSecond * tag.CadenceSeconds;
+                long first = ((lo.Ticks + stepTicks - 1) / stepTicks) * stepTicks;
+                for (long ticks = first; ticks <= hi.Ticks; ticks += stepTicks)
+                {
+                    var t = new DateTime(ticks, DateTimeKind.Local).AddSeconds(offset);
+                    if (t < lo || t > hi) continue;
+                    if (outages.Any(o => t >= o.Start && t < o.End)) continue;
+                    if (gone.Contains(Key(t))) continue;
+                    int idx = (int)((t.Ticks - lo.Ticks) / bucketTicks);
+                    if (idx < 0) idx = 0;
+                    if (idx >= buckets) idx = buckets - 1;
+                    counts[idx]++;
+                }
+
+                // Readings a restore wrote in this session count too.
+                SortedDictionary<long, float> written;
+                if (_written[main].TryGetValue(name, out written))
+                {
+                    foreach (var kv in written)
+                    {
+                        var t = new DateTime(kv.Key, DateTimeKind.Local);
+                        if (t < lo || t > hi) continue;
+                        int idx = (int)((t.Ticks - lo.Ticks) / bucketTicks);
+                        if (idx < 0) idx = 0;
+                        if (idx >= buckets) idx = buckets - 1;
+                        counts[idx]++;
+                    }
+                }
+            }
+            return result;
+        }
+
         public override List<string> WriteFloatSamples(
             ServerConnection conn, string tagName, List<DateTime> times, List<float> values)
         {

@@ -83,6 +83,7 @@
       <DesignTimeSharedInput>True</DesignTimeSharedInput>
     </Compile>
     <Compile Include="Services\BackfillJournalService.cs" />
+    <Compile Include="Services\CoverageScanner.cs" />
     <Compile Include="Services\DemoDataService.cs" />
     <Compile Include="Services\GapAnalysisService.cs" />
     <Compile Include="Services\HistorianConnectionService.cs" />
@@ -105,6 +106,8 @@
     <Compile Include="UI\Controls\FlatButton.cs" />
     <Compile Include="UI\Controls\GapTimeline.cs" />
     <Compile Include="UI\Controls\SectionHeader.cs" />
+    <Compile Include="UI\Controls\TagOverviewList.cs" />
+    <Compile Include="UI\Controls\ValueChart.cs" />
   </ItemGroup>
 
   <ItemGroup>
