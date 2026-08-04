@@ -46,10 +46,66 @@ namespace HistorianSyncTool.Services
         /// data). Zero when the point does not exist on the mirror at all — a restore could
         /// not write them, and reporting a number we cannot deliver would be a lie.
         /// </summary>
-        public int EstMissingOnMirror => MissingEntirely ? 0 : OneSided(Main, Mirror);
+        public int EstMissingOnMirror => MissingEntirely
+            ? 0 : OneSided(Main, Mirror) + Shortfall(Main, Mirror);
 
         /// <summary>Estimated readings the main server is missing.</summary>
-        public int EstMissingOnMain => MissingEntirely ? 0 : OneSided(Mirror, Main);
+        public int EstMissingOnMain => MissingEntirely
+            ? 0 : OneSided(Mirror, Main) + Shortfall(Mirror, Main);
+
+        /// <summary>
+        /// True when BOTH servers record in nearly every segment, so the segment counts are
+        /// dense enough to compare against each other. Below that, a server's silence in a
+        /// segment is just its cadence and count differences are noise.
+        /// </summary>
+        private bool DenseEnoughToCompare =>
+            MainCoverage >= 0.8 && MirrorCoverage >= 0.8 && SameRecordingRate;
+
+        /// <summary>
+        /// True when both servers record at a comparable overall rate. Two servers logging the
+        /// same point at genuinely different rates (different deadband, different collector
+        /// settings) will differ in every segment without anything being missing, so comparing
+        /// their per-segment counts would manufacture a difference. Live, the pair that really
+        /// does have missing readings sits at 14,115 vs 14,536 — within 3 %.
+        /// </summary>
+        private bool SameRecordingRate
+        {
+            get
+            {
+                long a = Total(Main), b = Total(Mirror);
+                if (a == 0 || b == 0) return false;
+                return (double)Math.Min(a, b) / Math.Max(a, b) >= 0.75;
+            }
+        }
+
+        private static long Total(int[] counts)
+        {
+            if (counts == null) return 0;
+            long sum = 0;
+            for (int i = 0; i < counts.Length; i++) sum += counts[i];
+            return sum;
+        }
+
+        /// <summary>
+        /// Readings one side is short BY inside segments where BOTH are recording.
+        ///
+        /// The outage rule alone cannot see an isolated missing reading — measured live, a point
+        /// with 2,915 restorable readings had no segment-level outage at all and would have been
+        /// reported as fine. Comparing counts only where both sides are active recovers most of
+        /// that (1,817 of 2,915) while staying silent on the sparse points that produced the
+        /// false alarms (0, matching what a restore would really copy).
+        ///
+        /// Still a LOWER BOUND, and still only an estimate: readings can differ inside a segment
+        /// without the counts differing at all.
+        /// </summary>
+        private int Shortfall(int[] have, int[] lack)
+        {
+            if (have == null || lack == null || !DenseEnoughToCompare) return 0;
+            int n = Math.Min(have.Length, lack.Length), sum = 0;
+            for (int i = 0; i < n; i++)
+                if (have[i] > 0 && lack[i] > 0 && have[i] > lack[i]) sum += have[i] - lack[i];
+            return sum;
+        }
 
         public bool InSync => Scanned && Error == null && !MissingEntirely
                               && EstMissingOnMirror == 0 && EstMissingOnMain == 0;
@@ -84,11 +140,53 @@ namespace HistorianSyncTool.Services
             return (double)with / counts.Length;
         }
 
+        /// <summary>
+        /// Readings one server holds inside a REAL outage on the other — not merely inside a
+        /// segment the other happens to have nothing in.
+        ///
+        /// Counting every one-sided segment fabricates alarms, and by a lot. Measured live
+        /// (2026-08-04, 7 days, 17-minute segments): STAT6.TEMP_04_F02_SCALE.F_CV logs about
+        /// once an hour on each server, so each reading lands in a different segment and almost
+        /// every segment looks one-sided — the naive count claimed 228 readings to restore where
+        /// SyncPlanner would copy exactly 0. Three more points behaved the same way (202/0,
+        /// 145/0, 266/0). On a 273-point plant that turns into a screen of false alarms.
+        ///
+        /// So a run of consecutive one-sided segments only counts when it is longer than the
+        /// lacking server's OWN typical spacing — i.e. longer than it would go quiet anyway.
+        /// Spacing is taken from its own fill ratio, so no extra reads are needed. This stays a
+        /// LOWER BOUND: a gap inside a populated segment is still invisible here, which is why
+        /// the drill-down recomputes with SyncPlanner.
+        /// </summary>
         private static int OneSided(int[] have, int[] lack)
         {
             if (have == null || lack == null) return 0;
-            int n = Math.Min(have.Length, lack.Length), sum = 0;
-            for (int i = 0; i < n; i++) if (have[i] > 0 && lack[i] == 0) sum += have[i];
+            int n = Math.Min(have.Length, lack.Length);
+            if (n == 0) return 0;
+
+            int lackFilled = 0;
+            for (int i = 0; i < n; i++) if (lack[i] > 0) lackFilled++;
+            if (lackFilled == 0) return 0;   // holds nothing here at all — see MissingEntirely
+
+            // How many segments this server normally goes between readings, from its own data.
+            double spacing = (double)n / lackFilled;
+            int minRun = (int)Math.Ceiling(spacing * 3.0);
+            if (minRun < 2) minRun = 2;
+
+            int sum = 0, runStart = -1, runSum = 0;
+            for (int i = 0; i <= n; i++)
+            {
+                bool oneSided = i < n && have[i] > 0 && lack[i] == 0;
+                if (oneSided)
+                {
+                    if (runStart < 0) { runStart = i; runSum = 0; }
+                    runSum += have[i];
+                }
+                else if (runStart >= 0)
+                {
+                    if (i - runStart >= minRun) sum += runSum;
+                    runStart = -1;
+                }
+            }
             return sum;
         }
     }
@@ -172,19 +270,26 @@ namespace HistorianSyncTool.Services
             }
 
             var clock = Stopwatch.StartNew();
+            var lastChunk = TimeSpan.Zero;   // cost of the previous chunk, to predict the next
             int done = 0;
 
             for (int i = 0; i < tags.Count; i += TagsPerQuery)
             {
                 token.ThrowIfCancellationRequested();
 
-                // Budget check BEFORE starting a chunk: the remaining points stay marked
-                // "not scanned" and the UI says so — never silently truncated.
-                if (budget > TimeSpan.Zero && clock.Elapsed >= budget)
+                // Budget check BEFORE starting a chunk — a chunk is atomic, so the only way to
+                // honour a limit is to decline to start one. Checking "have I run out?" alone
+                // overshoots by a whole chunk (measured: 13.7 s against a 10 s budget on a
+                // 1-year window), so also decline when the last chunk's cost says the next one
+                // would not fit. The remaining points stay marked "not scanned" and the UI says
+                // so — never silently truncated.
+                if (budget > TimeSpan.Zero &&
+                    (clock.Elapsed >= budget || clock.Elapsed + lastChunk > budget))
                 {
                     scan.Truncated = true;
                     break;
                 }
+                var chunkClock = Stopwatch.StartNew();
 
                 var chunk = tags.Skip(i).Take(TagsPerQuery).ToList();
                 // Ask each server only for the points it actually has. Cheaper, and it keeps a
@@ -229,6 +334,8 @@ namespace HistorianSyncTool.Services
                     done++;
                 }
 
+                chunkClock.Stop();
+                lastChunk = chunkClock.Elapsed;
                 if (progress != null) progress(done, tags.Count);
             }
 

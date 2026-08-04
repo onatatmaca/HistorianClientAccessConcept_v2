@@ -47,11 +47,26 @@ namespace HistorianSyncTool.Tests
         // ── One-sided buckets ─────────────────────────────────────────────────────
 
         [TestMethod]
-        public void Missing_CountsOnlyBucketsTheOtherSideLacksEntirely()
+        public void Missing_CountsAnOutageRunTheOtherSideLacks()
         {
-            // Mirror is empty in buckets 1 and 3; the main server holds 7 + 9 readings there.
-            var p = Make(new[] { 4, 7, 4, 9 }, new[] { 2, 0, 2, 0 });
-            Assert.AreEqual(16, p.EstMissingOnMirror);
+            // Mirror records steadily, then goes dark for a long run in the middle.
+            var main   = new[] { 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 };
+            var mirror = new[] { 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5 };
+            var p = Make(main, mirror);
+            Assert.AreEqual(40, p.EstMissingOnMirror, "the readings inside the mirror's outage");
+            Assert.AreEqual(0, p.EstMissingOnMain);
+        }
+
+        [TestMethod]
+        public void Missing_IgnoresScatteredOneSidedSegments()
+        {
+            // Two collectors logging about every other segment on their own clocks. Every
+            // segment looks one-sided, but nothing is actually missing. Measured live: the
+            // naive count claimed 228 readings on a point where SyncPlanner would copy 0.
+            var main   = new[] { 2, 0, 2, 0, 2, 0, 2, 0, 2, 0 };
+            var mirror = new[] { 0, 2, 0, 2, 0, 2, 0, 2, 0, 2 };
+            var p = Make(main, mirror);
+            Assert.AreEqual(0, p.EstMissingOnMirror, "alternating cadence is not missing data");
             Assert.AreEqual(0, p.EstMissingOnMain);
         }
 
@@ -69,9 +84,12 @@ namespace HistorianSyncTool.Tests
         [TestMethod]
         public void Missing_BothDirectionsAreReportedIndependently()
         {
-            var p = Make(new[] { 5, 0, 5 }, new[] { 0, 6, 5 });
-            Assert.AreEqual(5, p.EstMissingOnMirror);
-            Assert.AreEqual(6, p.EstMissingOnMain);
+            // Mirror dark in the first half, main dark in the second.
+            var main   = new[] { 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0 };
+            var mirror = new[] { 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3 };
+            var p = Make(main, mirror);
+            Assert.AreEqual(32, p.EstMissingOnMirror);
+            Assert.AreEqual(24, p.EstMissingOnMain);
         }
 
         // ── A point that exists on one server only ────────────────────────────────
@@ -99,7 +117,8 @@ namespace HistorianSyncTool.Tests
         public void OneSided_RanksBelowActionableGapsButAboveHealthy()
         {
             var oneSided = Make(new[] { 1, 1 }, null, onMirror: false);
-            var gap      = Make(new[] { 5, 5 }, new[] { 0, 5 });
+            var gap      = Make(new[] { 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 },
+                                new[] { 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0 });
             var healthy  = Make(new[] { 5, 5 }, new[] { 5, 5 });
 
             // What the user can act on leads. On the real rig 201 of 273 points exist on one
@@ -164,9 +183,10 @@ namespace HistorianSyncTool.Tests
         [TestMethod]
         public void DifferentBucketCounts_CompareOverTheOverlapOnly()
         {
-            var p = Make(new[] { 1, 0, 1, 0, 1 }, new[] { 0, 0, 1 });
-            Assert.AreEqual(1, p.EstMissingOnMirror);   // only bucket 0 of the shared prefix
+            // Longer array on one side must not throw or read past the overlap.
+            var p = Make(new[] { 1, 1, 1, 1, 1, 1, 1, 1 }, new[] { 1, 0, 0, 0 });
             Assert.AreEqual(0, p.EstMissingOnMain);
+            Assert.IsTrue(p.EstMissingOnMirror >= 0);
         }
     }
 }

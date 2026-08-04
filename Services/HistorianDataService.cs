@@ -258,6 +258,20 @@ namespace HistorianSyncTool.Services
                     var samples = set[tag];
                     int[] counts = result[tag];
                     int n = samples.Count();
+
+                    // The server returns one value per interval, in order. When we get exactly
+                    // the number we asked for, position IS the bucket — that is the definitive
+                    // mapping and it sidesteps the stamping question entirely.
+                    //
+                    // Mapping by timestamp instead was WRONG and measured so (2026-08-04,
+                    // STAT6.BHKW_01_GAS.F_CV, 7 days / 200 buckets): the total matched the raw
+                    // read exactly but 42 buckets were off by one position, because each
+                    // interval is stamped at its END, not its start. On a steady cadence that
+                    // is invisible in most buckets — but at the edges it reports an empty
+                    // bucket where the data starts, which the overview then reads as an outage
+                    // on one server and adds to the estimate.
+                    bool byPosition = (n == buckets);
+
                     for (int i = 0; i < n; i++)
                     {
                         object v = samples.GetValue(i);
@@ -270,7 +284,18 @@ namespace HistorianSyncTool.Services
                             continue;
                         if (c <= 0) continue;
 
-                        int idx = (int)((samples.GetTime(i).Ticks - fromUtc.Ticks) / bucketTicks);
+                        int idx;
+                        if (byPosition)
+                        {
+                            idx = i;
+                        }
+                        else
+                        {
+                            // Fallback (short/long response): treat the stamp as the interval
+                            // END, so a value stamped at from+step belongs to bucket 0.
+                            long offset = samples.GetTime(i).Ticks - fromUtc.Ticks - 1;
+                            idx = (int)(offset / bucketTicks);
+                        }
                         if (idx < 0) idx = 0;
                         if (idx >= buckets) idx = buckets - 1;
                         counts[idx] += (int)Math.Round(c);

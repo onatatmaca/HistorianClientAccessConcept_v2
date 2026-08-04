@@ -10,6 +10,39 @@ moved to [`known-issues-archive.md`](known-issues-archive.md); v1 pitfalls are i
 
 ---
 
+## CALIBRATION: the overview estimate, measured against the planner (Phase 12b, 2026-08-04)
+**Location:** `Services/CoverageScanner` · `PointCoverage.EstMissingOn*`
+
+The first version counted every one-sided segment as missing data. Measured live against what
+`SyncPlanner` would actually copy (TESTSV1/PC2, 7 days, 576 segments of 17m28s), that was
+**fabricating alarms** — and on the dense point it also missed everything real:
+
+| point | readings M/S | coverage | naive | now | SyncPlanner (truth) |
+|---|---|---|---|---|---|
+| TEMP_04_F02_SCALE | 168 / 172 | 29 % / 29 % | 228 | **0** | 0 |
+| TEMP_01_GRS01_SCALE | 168 / 174 | 29 % / 30 % | 202 | **0** | 0 |
+| NIVEAU_02_F01_SCALE | 168 / 173 | 29 % / 29 % | 145 | **0** | 0 |
+| GASDRUCK_01_F01_SCALE | 1 081 / 1 152 | 46 % / 44 % | 266 | **0** | 0 |
+| GASDRUCK_01_GAA_SCALE | 14 115 / 14 536 | 92 % / 96 % | 426 | **1 817** | 2 915 |
+
+Cause of the false alarms: those points log roughly hourly on each server independently, so
+each reading lands in a *different* 17-minute segment and nearly every segment looks one-sided.
+Cause of the miss: the dense point's gaps are isolated readings *inside* populated segments,
+which segment counts cannot see at all.
+
+The rule now has two parts, both computed from the counts already fetched (no extra reads):
+1. **Outage runs** — a run of one-sided segments counts only when it is longer than the lacking
+   server's OWN typical spacing (`3 × segments/filledSegments`), so cadence jitter cannot
+   produce one.
+2. **Shared-segment shortfall** — where BOTH servers are recording, the count difference is real
+   missing data. Applied only when both fill ≥ 80 % of segments AND their totals are within 25 %
+   of each other; otherwise the two are simply recording at different rates and per-segment
+   counts mean nothing.
+
+It remains a **lower bound** (1 817 of a true 2 915) and is labelled as such on screen. The
+drill-down recomputes with `SyncPlanner`, which stays the only thing that decides what a
+restore writes.
+
 ## BUG: "restored by this tool" band drawn 1–2 h off (fixed Phase 12a)
 **Location:** `Forms/MainForm.cs` · `LoadBackfilledRanges`
 

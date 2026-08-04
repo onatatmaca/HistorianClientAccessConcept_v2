@@ -21,10 +21,13 @@ strips that suffix; otherwise `PC2` is appended.
   a *Check the rest* button — never silently truncated.
 - **Card 2, one point** — the zoomable `GapTimeline`, the `ValueChart` (both servers overlaid,
   missing periods shaded), and the two scrollable data tables. `‹ All measurement points` returns.
-- **Estimate vs exact — do not blur this.** The overview is an ESTIMATE: a bucket counts as
-  "has data" from a single reading, and one-sided buckets are an OUTAGE-level figure. Opening a
-  point recomputes with `SyncPlanner`. Everything a restore writes still comes from `SyncPlanner`
-  alone; the scan never feeds a write path. Every estimate on screen is marked "~".
+- **Estimate vs exact — do not blur this.** The overview is an ESTIMATE and always a LOWER
+  BOUND. Two signals, both from the counts already fetched: an outage run only counts when it
+  is longer than the lacking server's own typical spacing, and a shared-segment count shortfall
+  only counts when both servers fill ≥ 80 % of segments at comparable rates. Counting every
+  one-sided segment instead fabricated alarms on real data (228 where a restore would copy 0 —
+  see `known-issues.md` for the measured table). Opening a point recomputes with `SyncPlanner`,
+  which alone decides what a restore writes; the scan never feeds a write path. Marked "~".
 - **Resolution is part of the truth.** A gap SHORTER than one bar segment cannot appear at all.
   Measured live (2026-08-04, TESTSV1/PC2, 273 points): a 13-day window flagged **251** points,
   the same servers over 365 days flagged only **201** — the ~50 real gaps were shorter than a
