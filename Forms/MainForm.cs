@@ -419,6 +419,8 @@ namespace HistorianSyncTool.Forms
         private CoverageScan _lastScan;
         private string _overviewVerdict = "";
         private List<string> _scanTags = new List<string>();
+        private HashSet<string> _onMain   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string> _onMirror = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool _showingDetail;
 
         /// <summary>Shows the all-points list (centre card 1).</summary>
@@ -501,15 +503,16 @@ namespace HistorianSyncTool.Forms
             DateTime from = dtpStart.Value, to = dtpEnd.Value;
             if (from >= to) { SetStatus(Loc.T("msg.dateOrder"), true); return; }
 
-            // Points that exist on BOTH servers — the overview is about comparing them.
+            // The UNION of both servers, not the intersection: a point configured on only one
+            // side is exactly the kind of problem this screen should surface, and it is
+            // invisible if the list only shows what the two have in common.
+            _onMain   = new HashSet<string>(_browsedPrimaryTags,   StringComparer.OrdinalIgnoreCase);
+            _onMirror = new HashSet<string>(_browsedSecondaryTags, StringComparer.OrdinalIgnoreCase);
             if (_scanTags.Count == 0)
             {
-                var pri = new HashSet<string>(_browsedPrimaryTags, StringComparer.OrdinalIgnoreCase);
-                _scanTags = _browsedSecondaryTags.Where(t => pri.Contains(t))
-                                                 .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
-                                                 .ToList();
-                if (_scanTags.Count == 0)   // nothing shared: still show what the main server has
-                    _scanTags = _browsedPrimaryTags.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
+                var all = new HashSet<string>(_onMain, StringComparer.OrdinalIgnoreCase);
+                all.UnionWith(_onMirror);
+                _scanTags = all.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
             }
             if (_scanTags.Count == 0) { lstOverview.Clear(Loc.T("msg.noShared")); return; }
 
@@ -527,8 +530,10 @@ namespace HistorianSyncTool.Forms
                 var token = _cts.Token;
                 var tags  = _scanTags;
 
+                var onMain = _onMain; var onMirror = _onMirror;
                 var scan = await Task.Run(() => CoverageScanner.Scan(
-                    _data, conns.Main, conns.Mirror, tags, from, to, buckets, limit, token,
+                    _data, conns.Main, conns.Mirror, tags, onMain, onMirror,
+                    from, to, buckets, limit, token,
                     (done, total) => SetPhaseProgress(done, total, Loc.F("ov.scanning", done, total))),
                     token);
 
@@ -552,10 +557,13 @@ namespace HistorianSyncTool.Forms
                 return;
             }
 
-            int needAttention = _lastScan.Points.Count(p => p.Scanned && p.Error == null && !p.InSync);
-            _overviewVerdict = needAttention == 0
-                ? Loc.F("ov.summaryAllOk", _lastScan.Points.Count, _lastScan.Seconds)
-                : Loc.F("ov.summary", _lastScan.Points.Count, needAttention, _lastScan.Seconds);
+            int needAttention = _lastScan.Points.Count(p => p.NeedsAttention);
+            int oneSided      = _lastScan.Points.Count(p => p.MissingEntirely);
+            _overviewVerdict =
+                needAttention == 0 ? Loc.F("ov.summaryAllOk", _lastScan.Points.Count, _lastScan.Seconds)
+              : oneSided     >  0 ? Loc.F("ov.summaryMissing", _lastScan.Points.Count, needAttention,
+                                          oneSided, _lastScan.Seconds)
+                                  : Loc.F("ov.summary", _lastScan.Points.Count, needAttention, _lastScan.Seconds);
             // The estimate caveat belongs above the list, where there is room; the status bar
             // gets the verdict alone so it stays on one line.
             lblOverviewSummary.Text = _overviewVerdict + "   ·   " + Loc.T("ov.estimateNote");

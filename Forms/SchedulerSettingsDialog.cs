@@ -44,7 +44,7 @@ namespace HistorianSyncTool.Forms
                 .OrderBy(t => t)
                 .ToList();
 
-            Text            = "Scheduler Settings";
+            Text            = Loc.T("sch.title");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition   = FormStartPosition.CenterParent;
             MaximizeBox     = false;
@@ -68,7 +68,7 @@ namespace HistorianSyncTool.Forms
 
             _chkEnabled = new CheckBox
             {
-                Text     = "Enable scheduled backfill",
+                Text     = Loc.T("sch.enable"),
                 Location = new Point(leftLabel, y),
                 Size     = new Size(400, 22),
                 Font     = AppTheme.Bold
@@ -77,7 +77,7 @@ namespace HistorianSyncTool.Forms
             Controls.Add(_chkEnabled);
             y += 36;
 
-            AddLabel("Run every (minutes):", leftLabel, y);
+            AddLabel(Loc.T("sch.every"), leftLabel, y);
             _numInterval = new NumericUpDown
             {
                 Location = new Point(leftField, y - 2), Width = 100,
@@ -86,7 +86,7 @@ namespace HistorianSyncTool.Forms
             Controls.Add(_numInterval);
             y += 32;
 
-            AddLabel("Evaluation window (hours):", leftLabel, y);
+            AddLabel(Loc.T("sch.window"), leftLabel, y);
             _numWindow = new NumericUpDown
             {
                 Location = new Point(leftField, y - 2), Width = 100,
@@ -95,7 +95,7 @@ namespace HistorianSyncTool.Forms
             Controls.Add(_numWindow);
             y += 32;
 
-            AddLabel("Direction:", leftLabel, y);
+            AddLabel(Loc.T("sch.direction"), leftLabel, y);
             _cboDirection = new ComboBox
             {
                 Location = new Point(leftField, y - 2), Width = fieldWidth,
@@ -103,9 +103,9 @@ namespace HistorianSyncTool.Forms
             };
             _cboDirection.Items.AddRange(new object[]
             {
-                "Primary → Secondary",
-                "Secondary → Primary",
-                "Both directions"
+                Loc.T("sch.dirToMirror"),
+                Loc.T("sch.dirToMain"),
+                Loc.T("sch.dirBoth")
             });
             _cboDirection.SelectedIndex = 2;
             Controls.Add(_cboDirection);
@@ -114,7 +114,7 @@ namespace HistorianSyncTool.Forms
             // ── Tag selection: mask OR explicit multiselect ──────────────────────
             var hdrTags = new Label
             {
-                Text = "Tags to back fill", Location = new Point(leftLabel, y),
+                Text = Loc.T("sch.which"), Location = new Point(leftLabel, y),
                 Size = new Size(400, 18), Font = AppTheme.Bold, ForeColor = AppTheme.Navy
             };
             Controls.Add(hdrTags);
@@ -122,7 +122,7 @@ namespace HistorianSyncTool.Forms
 
             _rdoMask = new RadioButton
             {
-                Text = "Tags matching a filter mask:", Location = new Point(leftLabel, y),
+                Text = Loc.T("sch.byFilter"), Location = new Point(leftLabel, y),
                 Size = new Size(150, 22), Checked = true
             };
             _rdoMask.CheckedChanged += (s, e) => UpdateEnabledControls();
@@ -132,7 +132,7 @@ namespace HistorianSyncTool.Forms
             y += 22;
             Controls.Add(new Label
             {
-                Text = "* matches all shared tags. Use mask patterns to subset.",
+                Text = Loc.T("sch.filterHint"),
                 Location = new Point(leftField, y), Size = new Size(fieldWidth, 16),
                 Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary
             });
@@ -140,7 +140,7 @@ namespace HistorianSyncTool.Forms
 
             _rdoList = new RadioButton
             {
-                Text = "Only the tags I select below:", Location = new Point(leftLabel, y),
+                Text = Loc.T("sch.byList"), Location = new Point(leftLabel, y),
                 Size = new Size(400, 22)
             };
             _rdoList.CheckedChanged += (s, e) => UpdateEnabledControls();
@@ -163,8 +163,7 @@ namespace HistorianSyncTool.Forms
             {
                 Controls.Add(new Label
                 {
-                    Text = "No tags available — click “Browse Tags” on the main window first, "
-                         + "then reopen this dialog.",
+                    Text = Loc.T("sch.noTags"),
                     Location = new Point(leftLabel, y), Size = new Size(ClientSize.Width - 32, 28),
                     Font = AppTheme.Small, ForeColor = AppTheme.TextSecondary
                 });
@@ -173,7 +172,7 @@ namespace HistorianSyncTool.Forms
 
             _chkRunOnStartup = new CheckBox
             {
-                Text = "Run once on application startup",
+                Text = Loc.T("sch.runOnStartup"),
                 Location = new Point(leftLabel, y), Size = new Size(400, 22)
             };
             Controls.Add(_chkRunOnStartup);
@@ -187,16 +186,16 @@ namespace HistorianSyncTool.Forms
             _lblLastRun = new Label
             {
                 Text = lastRunUtc == DateTime.MinValue
-                            ? "Last run: (never)"
-                            : $"Last run: {lastRunUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}",
+                            ? Loc.T("sch.lastNever")
+                            : Loc.F("sch.last", lastRunUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")),
                 Location = new Point(8, 5), Size = new Size(pnlInfo.Width - 16, 18),
                 ForeColor = AppTheme.Navy
             };
             _lblNextRun = new Label
             {
                 Text = nextRunLocal == DateTime.MaxValue
-                            ? "Next run: (scheduling disabled)"
-                            : $"Next run: {nextRunLocal:yyyy-MM-dd HH:mm:ss}",
+                            ? Loc.T("sch.nextOff")
+                            : Loc.F("sch.next", nextRunLocal.ToString("yyyy-MM-dd HH:mm:ss")),
                 Location = new Point(8, 26), Size = new Size(pnlInfo.Width - 16, 18),
                 ForeColor = AppTheme.Navy
             };
@@ -205,7 +204,7 @@ namespace HistorianSyncTool.Forms
             Controls.Add(pnlInfo);
 
             // ── Bottom button row ─────────────────────────────────────────────────
-            _btnRunNow = MakeButton("Run Now", 90, AppTheme.Teal, Color.White);
+            _btnRunNow = MakeButton(Loc.T("sch.runNow"), 110, AppTheme.Teal, Color.White);
             _btnRunNow.Location = new Point(16, ClientSize.Height - 44);
             _btnRunNow.Click += (s, e) =>
             {
@@ -216,7 +215,7 @@ namespace HistorianSyncTool.Forms
             };
             Controls.Add(_btnRunNow);
 
-            _btnOk = MakeButton("Save", 80, AppTheme.Navy, Color.White);
+            _btnOk = MakeButton(Loc.T("sch.save"), 90, AppTheme.Navy, Color.White);
             _btnOk.Location = new Point(ClientSize.Width - 180, ClientSize.Height - 44);
             _btnOk.Click += (s, e) =>
             {
@@ -226,7 +225,7 @@ namespace HistorianSyncTool.Forms
             };
             Controls.Add(_btnOk);
 
-            _btnCancel = MakeButton("Cancel", 80, AppTheme.Surface, AppTheme.TextPrimary);
+            _btnCancel = MakeButton(Loc.T("dlg.cancel"), 90, AppTheme.Surface, AppTheme.TextPrimary);
             _btnCancel.FlatAppearance.BorderColor = AppTheme.Border;
             _btnCancel.Location = new Point(ClientSize.Width - 92, ClientSize.Height - 44);
             _btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };

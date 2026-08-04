@@ -16,6 +16,20 @@ namespace HistorianSyncTool.Services
         public int[] Main;
         public int[] Mirror;
 
+        /// <summary>
+        /// Whether the point is configured on each server AT ALL (from the tag browse, not from
+        /// the counts — a point can exist and simply hold nothing in the chosen period).
+        /// </summary>
+        public bool OnMain = true;
+        public bool OnMirror = true;
+
+        /// <summary>
+        /// The point exists on one server only. Reported, but never counted as readings to
+        /// restore: this tool writes samples, it does not create tags — the point has to be
+        /// configured on the other server before any data can go there.
+        /// </summary>
+        public bool MissingEntirely => Scanned && Error == null && (!OnMain || !OnMirror);
+
         /// <summary>False when the scan ran out of its time budget before reaching this point.</summary>
         public bool Scanned;
 
@@ -27,17 +41,24 @@ namespace HistorianSyncTool.Services
         public double MainCoverage   => Fraction(Main);
         public double MirrorCoverage => Fraction(Mirror);
 
-        /// <summary>Estimated readings the mirror is missing (buckets where only the main server has data).</summary>
-        public int EstMissingOnMirror => OneSided(Main, Mirror);
+        /// <summary>
+        /// Estimated readings the mirror is missing (buckets where only the main server has
+        /// data). Zero when the point does not exist on the mirror at all — a restore could
+        /// not write them, and reporting a number we cannot deliver would be a lie.
+        /// </summary>
+        public int EstMissingOnMirror => MissingEntirely ? 0 : OneSided(Main, Mirror);
 
         /// <summary>Estimated readings the main server is missing.</summary>
-        public int EstMissingOnMain => OneSided(Mirror, Main);
+        public int EstMissingOnMain => MissingEntirely ? 0 : OneSided(Mirror, Main);
 
-        public bool InSync => Scanned && Error == null
+        public bool InSync => Scanned && Error == null && !MissingEntirely
                               && EstMissingOnMirror == 0 && EstMissingOnMain == 0;
 
-        /// <summary>Worst first: most estimated missing readings at the top.</summary>
-        public int Severity => EstMissingOnMirror + EstMissingOnMain;
+        public bool NeedsAttention => Scanned && (Error != null || MissingEntirely || !InSync);
+
+        /// <summary>Worst first. A point that exists on only one server outranks any gap: it is
+        /// a configuration problem, and no amount of restoring will fix it.</summary>
+        public int Severity => MissingEntirely ? int.MaxValue : EstMissingOnMirror + EstMissingOnMain;
 
         private static double Fraction(int[] counts)
         {
@@ -94,10 +115,13 @@ namespace HistorianSyncTool.Services
         /// points need only a handful of round-trips.</summary>
         public const int TagsPerQuery = 20;
 
+        /// <param name="onMain">Points configured on the main server (from the tag browse).</param>
+        /// <param name="onMirror">Points configured on the mirror.</param>
         public static CoverageScan Scan(
             HistorianDataService data,
             ServerConnection main, ServerConnection mirror,
-            IList<string> tags, DateTime from, DateTime to,
+            IList<string> tags, ISet<string> onMain, ISet<string> onMirror,
+            DateTime from, DateTime to,
             int buckets, TimeSpan budget, CancellationToken token,
             Action<int, int> progress = null)
         {
@@ -107,7 +131,12 @@ namespace HistorianSyncTool.Services
             var byTag = new Dictionary<string, PointCoverage>(StringComparer.OrdinalIgnoreCase);
             foreach (var t in tags)
             {
-                var pc = new PointCoverage { Tag = t };
+                var pc = new PointCoverage
+                {
+                    Tag = t,
+                    OnMain   = onMain   == null || onMain.Contains(t),
+                    OnMirror = onMirror == null || onMirror.Contains(t)
+                };
                 byTag[t] = pc;
                 scan.Points.Add(pc);
             }
@@ -128,14 +157,21 @@ namespace HistorianSyncTool.Services
                 }
 
                 var chunk = tags.Skip(i).Take(TagsPerQuery).ToList();
+                // Ask each server only for the points it actually has. Cheaper, and it keeps a
+                // point that exists on one side only from muddying the other side's response.
+                var chunkMain   = chunk.Where(t => byTag[t].OnMain).ToList();
+                var chunkMirror = chunk.Where(t => byTag[t].OnMirror).ToList();
+
                 Dictionary<string, int[]> mainCounts = null, mirrorCounts = null;
                 string error = null;
 
                 try
                 {
-                    if (main   != null) mainCounts   = data.ReadBucketCounts(main,   chunk, from, to, buckets);
+                    if (main   != null && chunkMain.Count   > 0)
+                        mainCounts = data.ReadBucketCounts(main, chunkMain, from, to, buckets);
                     token.ThrowIfCancellationRequested();
-                    if (mirror != null) mirrorCounts = data.ReadBucketCounts(mirror, chunk, from, to, buckets);
+                    if (mirror != null && chunkMirror.Count > 0)
+                        mirrorCounts = data.ReadBucketCounts(mirror, chunkMirror, from, to, buckets);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)

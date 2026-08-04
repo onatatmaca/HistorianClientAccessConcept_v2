@@ -129,6 +129,10 @@ namespace HistorianSyncTool.UI.Controls
             Color verdictColor;
             if (!p.Scanned)                    { verdict = Loc.T("ov.notScanned");  verdictColor = AppTheme.TextSecondary; }
             else if (p.Error != null)          { verdict = Loc.T("ov.failed");      verdictColor = AppTheme.Danger; }
+            // A point configured on only one server is a different problem from a data gap:
+            // restoring cannot fix it, so it gets its own wording and its own colour.
+            else if (!p.OnMirror)              { verdict = Loc.T("ov.notOnMirror"); verdictColor = AppTheme.Warning; }
+            else if (!p.OnMain)                { verdict = Loc.T("ov.notOnMain");   verdictColor = AppTheme.Warning; }
             else if (p.InSync)                 { verdict = Loc.T("ov.inSync");      verdictColor = AppTheme.Success; }
             else
             {
@@ -150,8 +154,10 @@ namespace HistorianSyncTool.UI.Controls
 
             int barLeft  = rc.Left + 10;
             int barWidth = rc.Width - 20 - 44;   // room for the trailing percentages
-            DrawBar(g, p.Main,   p.Mirror, barLeft, rc.Top + 28, barWidth, p.MainCoverage,   Loc.T("ov.main"));
-            DrawBar(g, p.Mirror, p.Main,   barLeft, rc.Top + 28 + BarHeight + 3, barWidth, p.MirrorCoverage, Loc.T("ov.mirror"));
+            DrawBar(g, p.Main,   p.Mirror, barLeft, rc.Top + 28, barWidth, p.MainCoverage,
+                    Loc.T("ov.main"), p.OnMain);
+            DrawBar(g, p.Mirror, p.Main,   barLeft, rc.Top + 28 + BarHeight + 3, barWidth, p.MirrorCoverage,
+                    Loc.T("ov.mirror"), p.OnMirror);
         }
 
         /// <summary>
@@ -159,12 +165,33 @@ namespace HistorianSyncTool.UI.Controls
         /// here while the other server HAS it, grey = missing on both (nothing to copy).
         /// </summary>
         private void DrawBar(Graphics g, int[] mine, int[] other, int left, int top, int width,
-                             double coverage, string sideLabel)
+                             double coverage, string sideLabel, bool configured = true)
         {
             var rect = new Rectangle(left + 46, top, Math.Max(10, width - 46 - 46), BarHeight);
 
             using (var br = new SolidBrush(AppTheme.TextSecondary))
                 g.DrawString(sideLabel, AppTheme.Small, br, left, top - 1);
+
+            // The point is not configured on this server: hatched, not "empty". An empty bar
+            // would read as "has no data right now", which is a very different problem.
+            if (!configured)
+            {
+                using (var hatch = new HatchBrush(HatchStyle.WideUpwardDiagonal,
+                        Color.FromArgb(120, AppTheme.Warning), AppTheme.Background))
+                    g.FillRectangle(hatch, rect);
+                using (var pen = new Pen(AppTheme.Border))
+                    g.DrawRectangle(pen, rect.Left, rect.Top, rect.Width - 1, rect.Height - 1);
+                string note = Loc.T("ov.notConfigured");
+                SizeF ns = g.MeasureString(note, AppTheme.Small);
+                var nbox = new RectangleF(rect.Left + (rect.Width - ns.Width) / 2f - 4,
+                                          rect.Top + (rect.Height - ns.Height) / 2f,
+                                          ns.Width + 8, ns.Height);
+                using (var bg = new SolidBrush(Color.FromArgb(235, Color.White)))
+                    g.FillRectangle(bg, nbox);      // hatching behind text makes it unreadable
+                using (var br = new SolidBrush(AppTheme.TextPrimary))
+                    g.DrawString(note, AppTheme.Small, br, nbox.X + 4, nbox.Y);
+                return;
+            }
 
             if (mine == null || mine.Length == 0)
             {
@@ -230,6 +257,8 @@ namespace HistorianSyncTool.UI.Controls
         {
             if (!p.Scanned) return p.Tag + "\n" + Loc.T("ov.notScannedTip");
             if (p.Error != null) return p.Tag + "\n" + p.Error;
+            if (!p.OnMirror) return p.Tag + "\n" + Loc.T("ov.notOnMirrorTip");
+            if (!p.OnMain)   return p.Tag + "\n" + Loc.T("ov.notOnMainTip");
 
             string s = p.Tag + "\n"
                      + Loc.F("ov.tipCoverage", p.MainCoverage.ToString("P1"), p.MirrorCoverage.ToString("P1"));
