@@ -153,6 +153,14 @@ UI a technician or a manager understands, with the technical surface one switch 
       and one-sided buckets are an OUTAGE-level estimate — measured in demo: overview ~3,038 vs
       the point's exact 3,421. Opening a point recomputes with `SyncPlanner`, which stays the
       only thing that decides what a restore writes
+- [x] **Points that exist on ONE server only** are rows too (the list is the UNION, not the
+      intersection). Sorted to the very top, hatched bar + "point not set up on this server",
+      and deliberately **excluded from the readings-to-restore totals** — the tool writes
+      samples, it does not create measurement points, so a number there would be undeliverable
+- [x] `PointCoverageTests` (13 tests) + two headless probes driving the real code against the
+      demo pair: `scratchpad/probe-scanner.ps1` (14 checks incl. **bucket counts == raw
+      count**, budget truncation, worst-first order) and `probe-pointcoverage.ps1` (12 checks).
+      Both green — the MSTest suite itself still needs Visual Studio here
 - [ ] ⚠ **Live probe still owed**: `CalculatedQuery`/`Count` is proven only against the demo
       service. Before trusting it on plant data, verify counts against a raw read for a known
       window and measure the wall clock for ~78 points × 1 year
