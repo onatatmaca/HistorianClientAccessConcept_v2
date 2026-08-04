@@ -96,12 +96,38 @@ namespace HistorianSyncTool.Tests
         }
 
         [TestMethod]
-        public void OneSided_OutranksEveryDataGap()
+        public void OneSided_RanksBelowActionableGapsButAboveHealthy()
         {
             var oneSided = Make(new[] { 1, 1 }, null, onMirror: false);
-            var bigGap = Make(new[] { 1000000, 1000000 }, new[] { 0, 0 });
-            Assert.IsTrue(oneSided.Severity > bigGap.Severity,
-                "a point missing from a server is a configuration problem — restoring cannot fix it");
+            var gap      = Make(new[] { 5, 5 }, new[] { 0, 5 });
+            var healthy  = Make(new[] { 5, 5 }, new[] { 5, 5 });
+
+            // What the user can act on leads. On the real rig 201 of 273 points exist on one
+            // server only, and ranking those first buried every actual gap.
+            Assert.IsTrue(gap.SortRank < oneSided.SortRank, "restorable gaps must lead");
+            Assert.IsTrue(oneSided.SortRank < healthy.SortRank, "one-sided must stay above healthy");
+        }
+
+        [TestMethod]
+        public void SortRank_FailedReadsComeBeforeOneSided()
+        {
+            var failed = Make(null, null);
+            failed.Error = "read failed";
+            var oneSided = Make(new[] { 1 }, null, onMirror: false);
+            Assert.IsTrue(failed.SortRank < oneSided.SortRank);
+        }
+
+        [TestMethod]
+        public void BucketSpan_IsThePeriodDividedByBuckets()
+        {
+            var scan = new CoverageScan
+            {
+                From = new System.DateTime(2026, 1, 1),
+                To = new System.DateTime(2026, 1, 2),
+                Buckets = 24
+            };
+            Assert.AreEqual(System.TimeSpan.FromHours(1), scan.BucketSpan,
+                "the summary tells the user this — a gap shorter than one segment cannot show up");
         }
 
         [TestMethod]

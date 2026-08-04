@@ -374,6 +374,8 @@ namespace HistorianSyncTool.UI
             { "ov.back",              new[] { "‹  All measurement points",        "‹  Alle Messstellen" } },
             { "ov.estimateNote",      new[] { "Estimated from a fast check — open a point for exact numbers.",
                                               "Schätzung aus einer schnellen Prüfung — für genaue Zahlen eine Messstelle öffnen." } },
+            // Resolution is not a nicety: a gap shorter than one segment cannot appear here.
+            { "ov.resolution",        new[] { "each segment ≈ {0}",                "je Segment ≈ {0}" } },
 
             // ── Preview / restore dialogs ─────────────────────────────────────────
             { "dlg.selectPoints",     new[] { "Choose measurement points to restore",

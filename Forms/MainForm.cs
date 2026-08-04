@@ -565,8 +565,11 @@ namespace HistorianSyncTool.Forms
                                           oneSided, _lastScan.Seconds)
                                   : Loc.F("ov.summary", _lastScan.Points.Count, needAttention, _lastScan.Seconds);
             // The estimate caveat belongs above the list, where there is room; the status bar
-            // gets the verdict alone so it stays on one line.
-            lblOverviewSummary.Text = _overviewVerdict + "   ·   " + Loc.T("ov.estimateNote");
+            // gets the verdict alone so it stays on one line. The RESOLUTION is part of the
+            // caveat: an outage shorter than one segment cannot show up here at all.
+            lblOverviewSummary.Text = _overviewVerdict
+                + "   ·   " + Loc.F("ov.resolution", FormatDuration(_lastScan.BucketSpan))
+                + "   ·   " + Loc.T("ov.estimateNote");
 
             // Honest about what was left out, with the way to finish it.
             btnScanRest.Visible = _lastScan.Truncated;

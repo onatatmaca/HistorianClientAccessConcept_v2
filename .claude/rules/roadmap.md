@@ -161,9 +161,21 @@ UI a technician or a manager understands, with the technical surface one switch 
       demo pair: `scratchpad/probe-scanner.ps1` (14 checks incl. **bucket counts == raw
       count**, budget truncation, worst-first order) and `probe-pointcoverage.ps1` (12 checks).
       Both green — the MSTest suite itself still needs Visual Studio here
-- [ ] ⚠ **Live probe still owed**: `CalculatedQuery`/`Count` is proven only against the demo
-      service. Before trusting it on plant data, verify counts against a raw read for a known
-      window and measure the wall clock for ~78 points × 1 year
+- [x] **Live probe run 2026-08-04** against TESTSV1/PC2 (`scratchpad/probe-live-count.ps1`):
+      - `CalculatedQuery(Count)` works and is **cheaper than reading the data**: 0.04 s for 200
+        buckets vs 0.17 s for the equivalent raw read, total matching the raw sample count
+        exactly (10,080 on STAT6.BHKW_01_GAS.F_CV, 2026-05-20→27)
+      - The rig now holds **273 points**: main 79, mirror 266, only 72 shared, 194 mirror-only
+        (a migration left them on PC2) — which is what forced the ordering change below
+      - Full-list scan: **13 days ≈ 2.3 s** (inside budget), **365 days ≈ 40 s** (budget
+        truncates and offers "Check the rest"). Per-query cost scales with the archive walked,
+        not with round trips, so a year-wide scan is inherently slow
+      - Resolution matters: 251 points flagged at 13 days vs 201 at 365 days — gaps shorter
+        than one segment vanish. The summary now always states "each segment ≈ …"
+- [ ] Re-run the probe's bucket-by-bucket comparison (the first run compared against a
+      PowerShell-side bucketing that read `$s.Time` on a C# ValueTuple — runtime name is
+      `Item1`, so it was null and everything landed in bucket 0; script fixed, totals already
+      matched)
 
 ### Phase 12c — per-point drill-down ✅
 - [x] Centre is a two-card swap: overview ⇄ detail. Detail = "‹ All measurement points" +

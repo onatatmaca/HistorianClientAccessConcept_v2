@@ -25,6 +25,19 @@ strips that suffix; otherwise `PC2` is appended.
   "has data" from a single reading, and one-sided buckets are an OUTAGE-level figure. Opening a
   point recomputes with `SyncPlanner`. Everything a restore writes still comes from `SyncPlanner`
   alone; the scan never feeds a write path. Every estimate on screen is marked "~".
+- **Resolution is part of the truth.** A gap SHORTER than one bar segment cannot appear at all.
+  Measured live (2026-08-04, TESTSV1/PC2, 273 points): a 13-day window flagged **251** points,
+  the same servers over 365 days flagged only **201** — the ~50 real gaps were shorter than a
+  22 h segment. The summary line therefore always prints "each segment ≈ …".
+- **Measured cost** (same run): the count query is *cheaper than reading the data* — 0.04 s for
+  200 buckets vs 0.17 s for the equivalent raw read, and its total matched the raw sample count
+  exactly (10,080). Full-list scans: 13 days ≈ **2.3 s**, 365 days ≈ **40 s**. Per-query cost
+  scales with how much archive the server must walk, not with the number of round trips, so a
+  long window is inherently slow — that is what the 10 s budget + "Check the rest" exists for.
+- **Ordering** is by `PointCoverage.SortRank`: restorable gaps, then read failures, then points
+  configured on one server only, then unchecked, then healthy. One-sided points must NOT lead —
+  on the live rig 201 of 273 points exist on one server only (a migration left them on PC2) and
+  ranking them first buried every actionable gap.
 - The right-hand panel always belongs to the visible card (list totals vs that point's exact
   numbers) — `ShowOverview`/`RunGapAnalysis` each refresh it.
 

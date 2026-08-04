@@ -56,9 +56,25 @@ namespace HistorianSyncTool.Services
 
         public bool NeedsAttention => Scanned && (Error != null || MissingEntirely || !InSync);
 
-        /// <summary>Worst first. A point that exists on only one server outranks any gap: it is
-        /// a configuration problem, and no amount of restoring will fix it.</summary>
-        public int Severity => MissingEntirely ? int.MaxValue : EstMissingOnMirror + EstMissingOnMain;
+        /// <summary>Estimated readings a restore would write for this point, both directions.</summary>
+        public int Severity => EstMissingOnMirror + EstMissingOnMain;
+
+        /// <summary>
+        /// Display group, lowest first. What the user can ACT ON comes first: points with
+        /// readings to restore, then read failures, then points configured on one server only,
+        /// then unchecked, then healthy.
+        ///
+        /// One-sided points deliberately do NOT lead. On the test rig 201 of 273 points exist
+        /// on one server only (a migration left them there), and putting them first buried
+        /// every actual data gap under a wall of them. They are still prominent — second group,
+        /// and counted separately in the summary line.
+        /// </summary>
+        public int SortRank =>
+            !Scanned          ? 3 :
+            Error != null     ? 1 :
+            MissingEntirely   ? 2 :
+            Severity > 0      ? 0 :
+                                4;
 
         private static double Fraction(int[] counts)
         {
@@ -83,6 +99,20 @@ namespace HistorianSyncTool.Services
         public List<PointCoverage> Points = new List<PointCoverage>();
         public DateTime From, To;
         public int Buckets;
+
+        /// <summary>
+        /// How much time one bar segment covers — the resolution of the whole estimate.
+        ///
+        /// This is not a detail: a gap SHORTER than one segment can disappear entirely,
+        /// because the segment still holds readings on both sides. Measured on the real rig,
+        /// a 13-day window flagged 251 points and the same servers over 365 days flagged only
+        /// 201 — the ~50 real gaps were shorter than a 22-hour segment. The overview must
+        /// therefore say what its resolution is, and the exact numbers stay in the drill-down.
+        /// </summary>
+        public TimeSpan BucketSpan =>
+            (Buckets > 0 && To > From)
+                ? TimeSpan.FromTicks((To - From).Ticks / Buckets)
+                : TimeSpan.Zero;
 
         /// <summary>True when the time budget ran out and some points were left unscanned.</summary>
         public bool Truncated;
@@ -205,9 +235,10 @@ namespace HistorianSyncTool.Services
             clock.Stop();
             scan.Seconds = clock.Elapsed.TotalSeconds;
 
-            // Worst first — the problem finds the user instead of the user hunting for it.
+            // Actionable first — the problem finds the user instead of the user hunting for it.
             scan.Points = scan.Points
-                .OrderByDescending(p => p.Severity)
+                .OrderBy(p => p.SortRank)
+                .ThenByDescending(p => p.Severity)
                 .ThenBy(p => p.Tag, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             return scan;

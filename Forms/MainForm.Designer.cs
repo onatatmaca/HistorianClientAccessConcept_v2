@@ -845,7 +845,7 @@ namespace HistorianSyncTool.Forms
 
             var pnlOverviewTop = new Panel
             {
-                Dock = DockStyle.Top, Height = 62, BackColor = AppTheme.Surface,
+                Dock = DockStyle.Top, Height = 78, BackColor = AppTheme.Surface,
                 Padding = new Padding(10, 8, 10, 4)
             };
             txtOverviewSearch = new TextBox
@@ -856,8 +856,10 @@ namespace HistorianSyncTool.Forms
 
             lblOverviewSummary = new Label
             {
-                Dock = DockStyle.Bottom, Height = 20, Font = AppTheme.Small,
-                ForeColor = AppTheme.TextSecondary, TextAlign = ContentAlignment.MiddleLeft
+                // Two lines: verdict + resolution + the estimate caveat do not fit on one,
+                // and the caveat is the part that must not be cut off.
+                Dock = DockStyle.Bottom, Height = 36, Font = AppTheme.Small,
+                ForeColor = AppTheme.TextSecondary, TextAlign = ContentAlignment.TopLeft
             };
             btnScanRest = new FlatButton
             {
@@ -866,7 +868,7 @@ namespace HistorianSyncTool.Forms
             };
             btnScanRest.Click += btnScanRest_Click;
 
-            var pnlSummaryRow = new Panel { Dock = DockStyle.Bottom, Height = 24, BackColor = AppTheme.Surface };
+            var pnlSummaryRow = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = AppTheme.Surface };
             pnlSummaryRow.Controls.Add(lblOverviewSummary);
             pnlSummaryRow.Controls.Add(btnScanRest);
 
