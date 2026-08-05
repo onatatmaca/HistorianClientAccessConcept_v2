@@ -22,10 +22,22 @@ namespace HistorianSyncTool.Services
         public static string JournalDirectory =>
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "backfill-journal");
 
-        /// <summary>Write (or overwrite, by Id) a journal entry to disk.</summary>
-        public static void Save(BackfillJournalEntry entry)
+        /// <summary>
+        /// Write (or overwrite, by Id) a journal entry to disk. Returns false if it could not
+        /// be written.
+        ///
+        /// Journaling still must never CRASH a restore — the samples are already on the server
+        /// by the time we get here, and throwing would lose the in-memory record as well. But
+        /// it must never be SILENT either: the journal is the only thing that makes a restore
+        /// undoable, so a run that could not be journaled is a run that can never be reverted.
+        /// This used to swallow every failure and return normally, so the caller set JournalId
+        /// unconditionally and the report said "N readings restored" with no hint that the undo
+        /// had been lost. A read-only install folder — exactly what a single-folder deployment
+        /// into Program Files produces — triggers it on every run. Callers must tell the user.
+        /// </summary>
+        public static bool Save(BackfillJournalEntry entry)
         {
-            if (entry == null || string.IsNullOrEmpty(entry.Id)) return;
+            if (entry == null || string.IsNullOrEmpty(entry.Id)) return false;
             try
             {
                 lock (Gate)
@@ -35,8 +47,14 @@ namespace HistorianSyncTool.Services
                     using (var fs = File.Create(path))
                         Serializer.WriteObject(fs, entry);
                 }
+                return true;
             }
-            catch { /* journaling must never crash a backfill */ }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError(
+                    "Backfill journal could not be saved (" + entry.Id + "): " + ex);
+                return false;
+            }
         }
 
         /// <summary>Load all journal entries, newest run first. Corrupt files are skipped.</summary>

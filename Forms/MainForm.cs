@@ -2408,8 +2408,24 @@ namespace HistorianSyncTool.Forms
                     // both-directions list right after the second direction finishes.
                     journal.ReportDirections = new List<JournalDirectionReport>
                         { JournalDirectionReport.From(report) };
-                    BackfillJournalService.Save(journal);
-                    report.JournalId = journal.Id;
+                    // The journal is the ONLY thing that makes this run undoable, so a failure
+                    // here is not a footnote — it must not be reported as an unqualified
+                    // success. Set JournalId only if the entry actually reached disk, and drop
+                    // `journal` so the cancel-path keep/revert prompt below does not offer an
+                    // undo that could never run.
+                    if (BackfillJournalService.Save(journal))
+                    {
+                        report.JournalId = journal.Id;
+                    }
+                    else
+                    {
+                        string warn = Loc.F("msg.journalFailed", report.SamplesWritten.ToString("N0"));
+                        report.Errors.Add(warn);
+                        Log(warn);
+                        SetStatus(warn, true);
+                        if (unattended) ScheduleLogger.Append("WARNING: " + warn);
+                        journal = null;
+                    }
                 }
                 catch (Exception ex) { Log($"Journal save error: {ex.Message}"); journal = null; }
             }
@@ -2545,9 +2561,21 @@ namespace HistorianSyncTool.Forms
                 {
                     entry.Reverted = true;
                     entry.RevertedLocal = DateTime.Now;
-                    BackfillJournalService.Save(entry);
-                    SetStatus(Loc.F("msg.undoDone", totalDeleted.ToString("N0"),
-                        ServerNaming.Short(entry.TargetLabel, entry.TargetHost)));
+                    // If this does not reach disk the deletions still happened, but the entry
+                    // stays Active in the list. That is the safe direction (re-reverting only
+                    // re-deletes what is already gone) — it just must not be announced as a
+                    // clean undo, or the history will contradict the server.
+                    if (BackfillJournalService.Save(entry))
+                    {
+                        SetStatus(Loc.F("msg.undoDone", totalDeleted.ToString("N0"),
+                            ServerNaming.Short(entry.TargetLabel, entry.TargetHost)));
+                    }
+                    else
+                    {
+                        string warn = Loc.F("msg.undoNotRecorded", totalDeleted.ToString("N0"));
+                        Log(warn);
+                        SetStatus(warn, true);
+                    }
                 }
                 else
                 {
@@ -2901,16 +2929,26 @@ namespace HistorianSyncTool.Forms
                 var secFill = new List<TimeRange>(); var secUnfill = new List<TimeRange>();
                 List<TimeRange> priBack = null, secBack = null;
                 bool priFeasKnown = false, secFeasKnown = false;
+                // A read that did not complete is not a server holding nothing. Track it so the
+                // empty table can say WHICH of the four reasons applies, and so a failed side is
+                // dropped from analysis entirely rather than being reported as 0 % complete.
+                bool priReadFailed = false, secReadFailed = false;
 
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
                     if (hasPrimary)
+                    {
                         priOnPrimary = SafeReadTimes(_connections.Primary, priTag, from, to);
+                        if (priOnPrimary == null) { priReadFailed = true; hasPrimary = false; }
+                    }
 
                     token.ThrowIfCancellationRequested();
                     if (hasSecondary)
+                    {
                         secOnSecondary = SafeReadTimes(_connections.Secondary, secTag, from, to);
+                        if (secOnSecondary == null) { secReadFailed = true; hasSecondary = false; }
+                    }
 
                     token.ThrowIfCancellationRequested();
                     // Feasibility samples: fetch opposite-server same-tag data unless already available
@@ -3027,6 +3065,19 @@ namespace HistorianSyncTool.Forms
                     priBack = LoadBackfilledRanges(priHost, priTag, from, to);
                     secBack = LoadBackfilledRanges(secHost, secTag, from, to);
                 }, token);
+
+                // Surface a read that did not complete. Sticky (|=), because the data table may
+                // have failed its own read earlier for the same point and that reason still
+                // stands. Without this the side simply vanishes from the analysis with no
+                // explanation on screen.
+                if (priReadFailed || secReadFailed)
+                {
+                    _readFailedPrimary   |= priReadFailed;
+                    _readFailedSecondary |= secReadFailed;
+                    UpdateEmptyMessages();
+                    Log(Loc.T("msg.checkReadFailed"));
+                    SetStatus(Loc.T("msg.checkReadFailed"), true);
+                }
 
                 _lastPrimaryResult   = priResult;
                 _lastSecondaryResult = secResult;
@@ -3184,7 +3235,19 @@ namespace HistorianSyncTool.Forms
             return result;
         }
 
-        /// <summary>Reads raw sample times for a tag; returns empty list on failure (e.g. tag missing).</summary>
+        /// <summary>
+        /// Raw sample times for a tag, or NULL if the read did not complete.
+        ///
+        /// Null, never an empty list. Callers already treat null as "this server was not read"
+        /// and skip analysis, feasibility and planning for that side — the same gating a point
+        /// that exists on only one server goes through. Returning an EMPTY LIST instead made a
+        /// failed read indistinguishable from a server holding nothing, on the very card that
+        /// then offers the restore: the analysis emitted a whole-period gap, the track read
+        /// 0.0 % complete, and SyncPlanner (empty target, fewer than 20 samples) planned to copy
+        /// every reading. The data table beside it said "could not load this server's readings"
+        /// at the same time. The service layer throws on ItemErrors precisely so this cannot
+        /// happen; swallowing it here put it straight back.
+        /// </summary>
         private List<DateTime> SafeReadTimes(
             Proficy.Historian.ClientAccess.API.ServerConnection conn,
             string tag, DateTime from, DateTime to)
@@ -3200,7 +3263,12 @@ namespace HistorianSyncTool.Forms
                     .OrderBy(t => t)
                     .ToList();
             }
-            catch { return new List<DateTime>(); }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError(
+                    "Gap-analysis read failed for '" + tag + "': " + ex);
+                return null;
+            }
         }
 
         /// <summary>

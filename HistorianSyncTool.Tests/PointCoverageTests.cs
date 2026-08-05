@@ -65,6 +65,45 @@ namespace HistorianSyncTool.Tests
             Assert.IsTrue(p.MainCoverage < 0, "unmeasured must be distinguishable from 0 %");
         }
 
+        // ── Total outage on one server (Phase 13 audit) ───────────────────────────
+
+        [TestMethod]
+        public void TotalOutage_CountsEveryReadingTheOtherServerHolds()
+        {
+            // The worst case this tool exists to find: the point IS configured on both, but the
+            // mirror recorded nothing at all in this window. It used to score 0 to restore —
+            // the spacing rule needs a cadence and a silent server has none, and the shortfall
+            // rule bailed out too — so the row was painted green as "no difference found" and
+            // sorted last, while opening it offered to restore every reading.
+            var p = Make(new[] { 10, 12, 9, 11 }, new[] { 0, 0, 0, 0 });
+
+            Assert.AreEqual(42, p.EstMissingOnMirror, "every reading the main server holds is missing there");
+            Assert.AreEqual(0, p.EstMissingOnMain);
+            Assert.IsFalse(p.InSync, "a total outage must never read as in sync");
+            Assert.AreEqual(0, p.SortRank, "it must lead the list, not sit at the bottom");
+        }
+
+        [TestMethod]
+        public void TotalOutage_NotClaimedWhenThePointIsNotConfiguredThere()
+        {
+            // Same counts, but the point does not exist on the mirror. A restore cannot create
+            // a measurement point, so promising 42 readings would be a number we cannot deliver.
+            var p = Make(new[] { 10, 12, 9, 11 }, new[] { 0, 0, 0, 0 }, onMirror: false);
+
+            Assert.AreEqual(0, p.EstMissingOnMirror);
+            Assert.IsTrue(p.MissingEntirely);
+        }
+
+        [TestMethod]
+        public void TotalOutage_SilenceOnBothServersIsNobodysFault()
+        {
+            // A plant-wide silence is not a restorable difference in either direction.
+            var p = Make(new[] { 0, 0, 0 }, new[] { 0, 0, 0 });
+
+            Assert.AreEqual(0, p.EstMissingOnMirror);
+            Assert.AreEqual(0, p.EstMissingOnMain);
+        }
+
         // ── Per-segment share (what the bars and the timeline paint) ──────────────
 
         [TestMethod]

@@ -233,7 +233,22 @@ namespace HistorianSyncTool.Services
 
             int lackFilled = 0;
             for (int i = 0; i < n; i++) if (lack[i] > 0) lackFilled++;
-            if (lackFilled == 0) return 0;   // holds nothing here at all — see MissingEntirely
+            if (lackFilled == 0)
+            {
+                // The lacking server recorded NOTHING in this window, though the point does
+                // exist there (MissingEntirely is excluded by the callers). That is a total
+                // outage — the single worst thing this tool looks for — and it used to return
+                // 0: the spacing rule below needs a cadence, and a server with no readings has
+                // none. Shortfall also returns 0 here (SameRecordingRate divides by a zero
+                // total), so the point scored InSync, was painted green as "no difference
+                // found" and sorted last, while opening it offered to restore every reading.
+                //
+                // Everything the other server holds is missing here, and that is also what a
+                // restore would write: an empty target means the whole window is one outage in
+                // outage-fill mode, and fewer than 20 target samples forces exact-diff anyway.
+                long all = Total(have);
+                return all > int.MaxValue ? int.MaxValue : (int)all;
+            }
 
             // How many segments this server normally goes between readings, from its own data.
             double spacing = (double)n / lackFilled;

@@ -295,14 +295,14 @@ namespace HistorianSyncTool.Forms
                     var srcSamples = _dataService.ReadRawInRange(_sourceConn, tag, _rangeStart, _rangeEnd);
                     srcCount = srcSamples.Count;
 
-                    List<(DateTime Time, float Value, double Quality)> tgtSamples = null;
-                    try
-                    {
-                        tgtSamples = _dataService.ReadRawInRange(_targetConn, tag, _rangeStart, _rangeEnd);
-                        tgtCount = tgtSamples.Count;
-                    }
-                    catch { tgtSamples = null; /* leave tgtCount=0 */ }
-                    if (tgtSamples == null) tgtSamples = new List<(DateTime, float, double)>();
+                    // NOT wrapped in its own catch. A failed TARGET read used to be turned into
+                    // an empty target here, and an empty target is the most dangerous input
+                    // this dialog can hand the planner: fewer than 20 target samples forces the
+                    // exact-diff branch, so "Will copy" became EVERY source reading, presented
+                    // as a fact next to a ticked checkbox. Let it reach the outer catch, which
+                    // marks the row as failed and unticks it.
+                    var tgtSamples = _dataService.ReadRawInRange(_targetConn, tag, _rangeStart, _rangeEnd);
+                    tgtCount = tgtSamples.Count;
 
                     // SyncPlanner is the same planner ExecuteBackfill uses, so the
                     // preview's "Will copy" count is exactly what a backfill would write
@@ -345,6 +345,11 @@ namespace HistorianSyncTool.Forms
                         _grid.Rows[row].Cells["Missing"].Value = "err";
                         _grid.Rows[row].Cells["Range"].Value   = err.Length > 40 ? err.Substring(0, 40) + "…" : err;
                         _grid.Rows[row].DefaultCellStyle.ForeColor = AppTheme.Danger;
+                        // Untick it and keep it unticked. We do not know what this point holds
+                        // on the target, so we cannot say what a copy would write — and "select
+                        // all" must not silently pull it back in.
+                        _grid.Rows[row].Cells["Sel"].Value    = false;
+                        _grid.Rows[row].Cells["Sel"].ReadOnly = true;
                     }
                     else
                     {
@@ -376,7 +381,11 @@ namespace HistorianSyncTool.Forms
         private void SetAllChecked(bool state)
         {
             for (int i = 0; i < _grid.Rows.Count; i++)
+            {
+                // Rows whose read failed are locked unticked — "select all" must not undo that.
+                if (_grid.Rows[i].Cells["Sel"].ReadOnly) continue;
                 _grid.Rows[i].Cells["Sel"].Value = state;
+            }
         }
 
         /// <summary>

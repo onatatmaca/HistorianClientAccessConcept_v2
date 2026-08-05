@@ -208,7 +208,7 @@ namespace HistorianSyncTool.Forms
             _btnRunNow.Location = new Point(16, ClientSize.Height - 44);
             _btnRunNow.Click += (s, e) =>
             {
-                SaveToSettings();
+                if (!SaveToSettings()) return;
                 RunNowRequested = true;
                 DialogResult = DialogResult.OK;
                 Close();
@@ -219,7 +219,7 @@ namespace HistorianSyncTool.Forms
             _btnOk.Location = new Point(ClientSize.Width - 180, ClientSize.Height - 44);
             _btnOk.Click += (s, e) =>
             {
-                SaveToSettings();
+                if (!SaveToSettings()) return;
                 DialogResult = DialogResult.OK;
                 Close();
             };
@@ -285,7 +285,14 @@ namespace HistorianSyncTool.Forms
             _rdoMask.Checked = !s.ScheduleUseTagList;
         }
 
-        private void SaveToSettings()
+        /// <summary>
+        /// Returns false if the dialog must stay open (the settings were not saved).
+        ///
+        /// The tag list needs care: an unattended run WRITES to a production historian, so its
+        /// scope must never widen without the user asking. Two ways that used to happen
+        /// silently, both fixed here — see the comments inline.
+        /// </summary>
+        private bool SaveToSettings()
         {
             var s = Settings.Default;
             s.ScheduleEnabled         = _chkEnabled.Checked;
@@ -298,9 +305,29 @@ namespace HistorianSyncTool.Forms
                 _cboDirection.SelectedIndex == 0 ? "PrimaryToSecondary" :
                 _cboDirection.SelectedIndex == 1 ? "SecondaryToPrimary" : "Both";
 
+            // Only rewrite the list when there was actually a list to choose from. The box is
+            // filled from the tags the main form last browsed, so it is EMPTY whenever nothing
+            // has been browsed yet (e.g. the mirror was down at startup). Rewriting from it
+            // then wiped a carefully chosen "only these 3 points" to "", while
+            // ScheduleUseTagList stayed true — and the scheduler falls back to the `*` mask
+            // when the list is blank. Changing the interval could therefore silently widen the
+            // next unattended run to every shared point.
+            if (_clbTags.Items.Count > 0)
+                s.ScheduleTagList = string.Join(";", _clbTags.CheckedItems.Cast<object>().Select(o => o.ToString()));
+
+            // Same fallback, reached deliberately: "specific points" chosen with none ticked
+            // is not a request to write to everything. Make the user resolve it.
+            bool listEmpty = string.IsNullOrWhiteSpace(s.ScheduleTagList);
+            if (_chkEnabled.Checked && _rdoList.Checked && listEmpty)
+            {
+                MessageBox.Show(this, Loc.T("sched.needPoints.body"), Loc.T("sched.needPoints.title"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
             s.ScheduleUseTagList = _rdoList.Checked;
-            s.ScheduleTagList    = string.Join(";", _clbTags.CheckedItems.Cast<object>().Select(o => o.ToString()));
             s.Save();
+            return true;
         }
 
         private void UpdateEnabledControls()

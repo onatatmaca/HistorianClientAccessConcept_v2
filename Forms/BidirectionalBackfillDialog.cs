@@ -43,6 +43,9 @@ namespace HistorianSyncTool.Forms
         private CancellationTokenSource _cts;
         private int _p2sRows;
         private int _s2pRows;
+        /// <summary>Points whose comparison could not be completed. Written only by the single
+        /// stats worker, read on the UI thread after it finishes.</summary>
+        private int _failedTags;
 
         // ── Per-tag mini timeline ──────────────────────────────────────────────────
         // Interval data is derived while the diff pass already holds each tag's sample
@@ -294,9 +297,11 @@ namespace HistorianSyncTool.Forms
                 try
                 {
                     var priData = _dataService.ReadRawInRange(_primaryConn, tag, _rangeStart, _rangeEnd);
-                    List<(DateTime Time, float Value, double Quality)> secData;
-                    try { secData = _dataService.ReadRawInRange(_secondaryConn, tag, _rangeStart, _rangeEnd); }
-                    catch { secData = new List<(DateTime, float, double)>(); }
+                    // Deliberately unguarded: substituting an empty list for a failed mirror
+                    // read made the planner take its exact-diff branch (fewer than 20 target
+                    // samples) and list EVERY reading as restorable — pre-ticked. A read that
+                    // did not complete tells us nothing about what the mirror holds.
+                    var secData = _dataService.ReadRawInRange(_secondaryConn, tag, _rangeStart, _rangeEnd);
 
                     // SyncPlanner = the same planner the backfill itself uses, so the
                     // listed counts are exactly what pressing Start would write.
@@ -314,7 +319,15 @@ namespace HistorianSyncTool.Forms
                     // while we still hold them (they are not kept beyond this iteration).
                     preview = BuildPreview(priData, secData, planP2S, planS2P);
                 }
-                catch { /* tag failed on source read — skip; backfill will report any real errors */ }
+                catch (Exception ex)
+                {
+                    // A point we could not compare is NOT a point with nothing to restore.
+                    // Silently skipping meant that if every read failed the dialog announced,
+                    // in green, "In sync - nothing to restore in either direction".
+                    _failedTags++;
+                    System.Diagnostics.Trace.TraceError(
+                        "Preview comparison failed for '" + tag + "': " + ex);
+                }
 
                 if (token.IsCancellationRequested) return;
                 int idx = i;
@@ -339,14 +352,21 @@ namespace HistorianSyncTool.Forms
             _progress.Visible = false;
             if (_p2sRows == 0 && _s2pRows == 0)
             {
-                _lblProgress.Text = Loc.T("dlg.inSyncBoth");
-                _lblProgress.ForeColor = AppTheme.Success;
+                // Only claim "in sync" if we actually managed to compare everything. Otherwise
+                // the empty lists mean "we could not look", which is the opposite of reassuring.
+                bool compared = _failedTags == 0;
+                _lblProgress.Text = compared
+                    ? Loc.T("dlg.inSyncBoth")
+                    : Loc.F("dlg.noneCompared", _failedTags);
+                _lblProgress.ForeColor = compared ? AppTheme.Success : AppTheme.Danger;
                 _btnStart.Enabled = false;
             }
             else
             {
-                _lblProgress.Text = Loc.F("dlg.readyCounts", _p2sRows, _s2pRows);
-                _lblProgress.ForeColor = AppTheme.Success;
+                _lblProgress.Text = _failedTags == 0
+                    ? Loc.F("dlg.readyCounts", _p2sRows, _s2pRows)
+                    : Loc.F("dlg.readyCountsPartial", _p2sRows, _s2pRows, _failedTags);
+                _lblProgress.ForeColor = _failedTags == 0 ? AppTheme.Success : AppTheme.Warning;
                 _btnStart.Enabled = true;
             }
         }
