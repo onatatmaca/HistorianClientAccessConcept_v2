@@ -223,6 +223,12 @@ würden — berechnet aus den Messwerten selbst, nicht geschätzt.
 
 ### 5.5 Fehlende Messwerte wiederherstellen
 
+![Vorschau vor dem Wiederherstellen](img/04-preview.png)
+
+*Die Vorschau vor dem Schreiben. Links, was auf dem Spiegel fehlt, rechts, was auf dem
+Hauptserver fehlt; unten die Zeitachse der markierten Messstelle. **1** startet die
+Wiederherstellung, **2** bricht ohne jede Änderung ab.*
+
 1. Klicken Sie auf **Fehlende Daten wiederherstellen…**
 2. Das Programm vergleicht beide Server und zeigt pro Messstelle genau an, wie viele Messwerte
    es kopieren würde und über welchen Zeitraum. **Es wurde noch nichts geschrieben.**
@@ -246,6 +252,11 @@ würden — berechnet aus den Messwerten selbst, nicht geschätzt.
 
 **Reparaturverlauf / rückgängig…** listet jede durchgeführte Wiederherstellung auf: wann, in
 welche Richtung, wie viele Messwerte, und ob sie inzwischen rückgängig gemacht wurde.
+
+![Reparaturverlauf](img/05-history.png)
+
+*Der Reparaturverlauf, hier noch ohne Einträge. Rückgängig ist doppelt gesichert: erst **1**
+freigeben, dann **2** ausführen; **3** öffnet den Bericht des ausgewählten Laufs.*
 
 So machen Sie eine rückgängig:
 
