@@ -182,23 +182,17 @@ query **starts early by the UTC offset** (1 h winter / 2 h summer) and returns s
 
 ### Data loss (external tooling, NOT the app) — fixed + data restored
 A throwaway helper read `[from,to]` with only `if (ts > to) break;` (**no `ts < from` guard**) and
-deleted every timestamp it read ⇒ **~1 h of Secondary data BEFORE the window was destroyed** (API
-hour `2026-02-09 23` = Historian-local `2026-02-10 00:00–01:00`); backfills, correctly scoped by
-`SyncPlanner`'s `t >= evalFrom`, never restored it. Restored from Primary (2,343 samples).
-**The app cannot do this**: its only `IData.Delete` consumes **journal ticks**, never a read
-(`MainForm.cs:1674`), and `SampleFilter.cs:35` has the `if (s.Time < start) continue;` guard.
-`IData.Delete` has no range overload (verified by reflection).
+deleted every timestamp it read ⇒ **~1 h of Secondary data BEFORE the window was destroyed**;
+restored from Primary (2,343 samples). **The app cannot do this**: its only `IData.Delete`
+consumes **journal ticks**, never a read, and `SampleFilter` has the `if (s.Time < start)
+continue;` guard. `IData.Delete` has no range overload (verified by reflection).
 
 ### FIXED — the app now converts at the API boundary (single point)
 `HistorianDataService` gained `ToApi()` / `FromApi()`; **the API frame stops at that service and the
 rest of the app works in LOCAL time**. Applied to every crossing: query bounds, returned times,
-`WriteFloatSamplesWithQuality`, `DeleteSamples`, `ReadRaw`, `ReadInterpolated`. `ReadRawInRange`
-runs its chunk loop in UTC (`cursor = lastTs.AddTicks(1)` **preserves Kind** — never
-`new DateTime(ticks+1)`), clips in UTC, then hands back local.
-
-**Verified live** (2026-07-16, picker-style `Kind=Local` window `2026-02-10 00:00→00:03`): the app
-now returns `00:00:50=50.8, 00:01:00=51.1, 00:01:10=51.4 …` — **identical to Historian Trend**,
-`Kind=Local`. Previously it returned `00:00:40=51.3` (the UTC frame).
+writes, deletes, `ReadRaw`, `ReadInterpolated`. `ReadRawInRange` runs its chunk loop in UTC
+(`cursor = lastTs.AddTicks(1)` **preserves Kind** — never `new DateTime(ticks+1)`), clips in UTC,
+then hands back local. **Verified live** against Historian Trend on a picker-style window.
 
 This one change fixed **by construction**: the dead live-edge guard, the scheduler's future-window
 no-op, the empty "Last 1h" preset, the ~1–2 h window shift (first hour silently dropped: 8,383 read
