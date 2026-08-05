@@ -43,6 +43,63 @@ It remains a **lower bound** (1 817 of a true 2 915) and is labelled as such on 
 drill-down recomputes with `SyncPlanner`, which stays the only thing that decides what a
 restore writes.
 
+## BUG: "0 % complete" painted solid green, and every list row looked identical (fixed 12e)
+**Location:** `PointCoverage` · `GapTimeline.DrawTrack` · `TagOverviewList.DrawBar`
+
+Two symptoms, one cause. Completeness was **"fraction of segments holding ≥ 1 reading"** and the
+tracks were painted **green, with gap rectangles over the top**. Both are all-or-nothing per
+segment, and a segment is hours wide on a long window.
+
+Measured live (`tools/probes/probe-resolution.ps1`, `STAT6.TEMPRL_01_BHKW02_SCALE.F_CV`,
+2024-08-05→2025-08-05, 600 segments of **14.6 h**):
+
+| measure | main | mirror |
+|---|---|---|
+| segments touched (what was drawn) | **100.0 %** | **100.0 %** |
+| share of everything recorded (now) | **99.5 %** | **98.8 %** |
+
+and `SyncPlanner`'s 21,261 copyable readings touched **539 of 600** segments — so the same track
+was **labelled 100 % and painted 89.8 % red**. Every row in the all-points list was solid green
+at ~100 % for the same reason. A server with NO readings produced no gap rectangles at all, so
+it kept the green base: **0 % and green**.
+
+**Fix:** one definition in both cards — per segment, the share of the readings the better-served
+server has (`PointCoverage.SegmentShare` / `ShareOfBest`), and the bars and tracks are painted
+green *in proportion* to it. The percentage and the picture are then the same quantity by
+construction. The yardstick is the other server, not an absolute rate, because this tool can
+only ever make one server match the other — and that also survives deadband tags, since both
+servers see the same deadband. `SegmentsTouched` survives only as the density gate inside the
+estimate, which was calibrated against it.
+
+Note the remaining honest difference: red area is "share of readings the other server has that
+this one lacks", while `SyncPlanner` decides what a restore actually WRITES (in
+independent-collector mode it fills only real outages). The planner remains the only thing that
+drives a write, and its exact number is what the right panel and the missing-data table show.
+
+## PERF: 1,006 MB for one point over a year, in an x86 process (fixed 12e)
+**Location:** `Forms/MainForm.cs` · `GridRow` · `UI/Controls/ValueChart.cs`
+
+Measured live opening one point on a 1-year window. x86 runs out of address space around
+1.2 GB, so this was close to failing, not merely slow. Two causes:
+1. Every table row cached its three DISPLAY STRINGS (~150 bytes/row) although the grids are
+   **virtual** — millions of strings built only to be discarded. `GridRow` now holds the raw
+   `DateTime`/`float`/quality (~32 bytes) and `CellValueNeeded` formats the cells actually on
+   screen. **1,006 MB → 639 MB**, and the tables appear immediately.
+2. `ValueChart` rebuilt its decimated min/max envelope **inside `OnPaint`** — ~3 M readings per
+   server per repaint, and the hover crosshair repaints. Now cached per (data, width, plot,
+   range). Same picture, same detail.
+
+**Still open:** the remaining 639 MB is the gap analysis re-reading both servers into its own
+`List<DateTime>` for a window `ReadPrimaryData`/`ReadSecondaryData` just loaded. Reusing those
+would remove a whole second read per server. Deferred to the audit — it changes what the
+analysis sees.
+
+## BUG: a demo session displayed the real server addresses (fixed 12e)
+`LoadSettings` loaded the persisted hostnames and the demo block overwrote them *afterwards* —
+but the header strip and the timeline track labels are derived in between. A `--demo` screenshot
+showed `192.168.50.186 — main server`. The names are set inside `LoadSettings` now. Demo mode
+exists so a screenshot can never be mistaken for live data; that guarantee is the whole point.
+
 ## BUG: a one-sided point was offered a restore it could never deliver (fixed Phase 12d)
 **Location:** `Forms/MainForm.cs` · `RunGapAnalysis`, `BuildTrack`, `UpdateGapAnalysisUI`
 

@@ -1,12 +1,23 @@
-# HANDOFF — after Phase 12d (2026-08-05)
+# HANDOFF — after Phase 12e (2026-08-05)
 
 Live continuation note. Delete this file when Phase 14 ships.
 
 ## Where things stand
 
-**Phase 12d is complete, committed and verified live.** The working tree is clean and the
-build is green. Next up: **Phase 13 (audit)**, then **Phase 14 (v1.0 + installer + docs)** —
-see [`roadmap.md`](roadmap.md).
+**Phases 12d and 12e are complete, committed and verified live.** The build is green.
+Next: **Phase 13 (audit)**, then **Phase 14 (v1.0 + installer + docs)** — see
+[`roadmap.md`](roadmap.md), which now carries three measured items into the audit.
+
+**The user has decided: BUNDLE the Proficy ClientAccess DLL** with the installer (they said
+so on 2026-08-05). `lib/` already holds a local copy for building without the Historian
+client; the installer just ships it beside the exe. Worth one sentence to them before
+release about redistributing a GE assembly — their call, not a blocker.
+
+**Do not re-litigate these — they were measured, not reasoned:**
+- Completeness = share of everything recorded that this server holds, painted in proportion.
+  "Segments touched" saturates at 100 % on any long window and made every row identical.
+- A scan has NO time budget; it checks every point (273 over a year ≈ 20 s).
+- The tables must never cache display strings — that was 1,006 MB for one point on x86.
 
 ## Build / verify commands
 

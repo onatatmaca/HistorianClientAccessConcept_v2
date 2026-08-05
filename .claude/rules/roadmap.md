@@ -88,7 +88,38 @@ Boss review of the live build. Two defects first — both make the app show WRON
   **5 → mirror, 3 → main** and segment completeness **100.0 % / 100.0 %** — every one of
   those is exactly what the app printed, and 5 − 3 = the raw net of 2
 
+## Phase 12e — what "complete" means, and x86 memory (2026-08-05) ✅
+Raised by the user from live screenshots: a track reading **0 % painted solid green**, and every
+row of the all-points list looking identical while the same points, opened, were almost entirely
+red. Both were the same defect — see the measured table in
+[`known-issues.md`](known-issues.md).
+- [x] One definition of completeness in both cards: the share of everything recorded for that
+      point that this server holds, with bars and tracks painted green **in proportion** to it,
+      so the number and the picture are the same quantity by construction
+- [x] **"Check the rest" removed** — a scan checks every point, however long it takes (273
+      points over a full year: **20 s**). A partial answer to "what is missing?" is worse than
+      a slower complete one
+- [x] `ValueChart` caches its decimated envelope instead of rebuilding it inside `OnPaint`
+      (~3 M readings per server, on every hover)
+- [x] `GridRow` holds raw values, not display strings — **1,006 MB → 639 MB** on the same point
+- [x] A `--demo` session no longer shows the real server addresses
+- [x] `PointCoverageTests` updated, including the saturation case the change exists for
+
 ## Phase 13 — full audit before shipping
+
+### Carried in from 12e, with measurements
+- [ ] **Gap analysis re-reads both servers** for a window the tables just loaded (the remaining
+      639 MB, and a doubled read time per point). Reuse `_rawPrimarySamples` when the tag and
+      window match — verify it does not change what the analysis sees
+- [ ] **`SyncPlanner`'s 90 % aligned-stream threshold is borderline on real pairs.** Measured on
+      `STAT6.TEMPRL_01_BHKW02_SCALE.F_CV` over a year: exact-second match **90.6 %**, so it took
+      the exact-diff branch and reported **21,261** readings to copy, while share-of-best puts the
+      real shortfall near **1 %**. Just under the threshold it would have reported only genuine
+      outages. **Do not touch the threshold without a lot more measurement** — it decides what
+      gets WRITTEN
+- [ ] Compare mode still materialises one row object per sample on both sides; on a year-long
+      window that is the same scale problem the tables just shed
+
 - [ ] Parallel code audit (subagents): write/delete safety, UTC boundary, async + cancellation,
       UI state machine, error handling, resource lifetime, dead code
 - [ ] Live cross-check: every number the app shows verified against an independent read of the
