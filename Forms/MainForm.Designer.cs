@@ -47,6 +47,7 @@ namespace HistorianSyncTool.Forms
         private ComboBox       txtSecondary;
         private Label          lblSecondaryStatus;
         private FlatButton     btnConnect;
+        private FlatButton     btnCredentials;
 
         // Left — Evaluation period
         private SectionHeader  hdrPeriod;
@@ -343,6 +344,13 @@ namespace HistorianSyncTool.Forms
             btnConnect = MakeButton("", lw, pad, lblSecondaryStatus.Bottom + 8);
             btnConnect.Click += btnConnect_Click;
 
+            // Servers that reject an empty user name need a login, and the delivered package
+            // deliberately ships without one. Without this button the only way to supply it was
+            // to hand-edit the .config beside the exe.
+            btnCredentials = MakeButton("", lw, pad, btnConnect.Bottom + 6);
+            btnCredentials.ButtonStyle = FlatButtonStyle.Secondary;
+            btnCredentials.Click += btnCredentials_Click;
+
             // Shared tooltip provider — texts are assigned in ApplyTexts so they follow
             // the language switch. Server fields accept "host", "host:port", "ip", "ip:port".
             _tips = new ToolTip(components) { AutoPopDelay = 12000, InitialDelay = 400 };
@@ -351,9 +359,9 @@ namespace HistorianSyncTool.Forms
             {
                 lblPrimary, txtPrimary, lblPrimaryStatus,
                 lblSecondary, txtSecondary, lblSecondaryStatus,
-                btnConnect
+                btnConnect, btnCredentials
             });
-            pnlConnContent.Height = btnConnect.Bottom + 10;
+            pnlConnContent.Height = btnCredentials.Bottom + 10;
 
             // ── EVALUATION PERIOD (includes gap analysis mode radios) ──────────────
             hdrPeriod = new SectionHeader
@@ -930,6 +938,7 @@ namespace HistorianSyncTool.Forms
             lblPrimary.Text      = Loc.T("lbl.primaryServer");
             lblSecondary.Text    = Loc.T("lbl.secondaryServer");
             btnConnect.Text      = Loc.T("btn.connect");
+            btnCredentials.Text  = Loc.T("cred.button");
 
             // Sidebar — time range
             hdrPeriod.Text       = Loc.T("hdr.period");

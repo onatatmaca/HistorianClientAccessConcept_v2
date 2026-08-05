@@ -127,8 +127,19 @@ Click **Connect**. Under each field the tool reports **Connected**, or the reaso
 connect. Only addresses that actually connected are remembered for next time — a mistyped
 address is never offered back to you.
 
-If the servers reject an empty user name, enter a login once in
-`HistorianSyncTool.exe.config` — see [chapter 8](#8-appendix).
+**If the server asks for a login.** Most Historian servers reject an anonymous connection and
+answer *"the server has rejected the client credentials"*. That is not a problem with the
+address — the server was reached, it just would not let you in. Click **Login…**, enter the
+Historian user name and password, and connect again. The same login is used for both servers.
+
+Tick **Remember on this PC** to avoid retyping it. The password is then stored encrypted for
+your Windows account only: it cannot be read by another user or on another computer, and it is
+never part of the delivered program folder.
+
+Leave both fields empty to connect as your Windows account instead — which is the right choice
+when the tool runs on the Historian machine itself.
+
+If the login is refused, the tool offers this dialog to you automatically.
 
 ### 5.2 Choosing the time range
 

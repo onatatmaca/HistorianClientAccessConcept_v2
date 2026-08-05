@@ -45,6 +45,9 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Configuration" />
+    <!-- ProtectedData (DPAPI), used to store the Historian password for the current
+         Windows user only. See Services\HistorianCredentials.cs -->
+    <Reference Include="System.Security" />
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.IdentityModel" />
@@ -65,6 +68,7 @@
     <Compile Include="Forms\BackfillHistoryDialog.cs" />
     <Compile Include="Forms\BidirectionalBackfillDialog.cs" />
     <Compile Include="Forms\ChartDialog.cs" />
+    <Compile Include="Forms\CredentialsDialog.cs" />
     <Compile Include="Forms\ProgressDialog.cs" />
     <Compile Include="Forms\SchedulerSettingsDialog.cs" />
     <Compile Include="Forms\SyncReportDialog.cs" />
@@ -89,6 +93,7 @@
     <Compile Include="Services\GapAnalysisService.cs" />
     <Compile Include="Services\HistorianConnectionService.cs" />
     <Compile Include="Services\HistorianDataService.cs" />
+    <Compile Include="Services\HistorianCredentials.cs" />
     <Compile Include="Services\HostInputParser.cs" />
     <Compile Include="Services\IntervalBuilder.cs" />
     <Compile Include="Services\ProficyEndpoint.cs" />

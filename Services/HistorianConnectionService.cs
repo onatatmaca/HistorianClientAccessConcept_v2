@@ -16,12 +16,11 @@ namespace HistorianSyncTool.Services
         private static ConnectionProperties BuildProperties(string hostname)
         {
             var props = new ConnectionProperties { ServerHostName = hostname };
-            string user = ConfigurationManager.AppSettings["HistorianUsername"];
-            if (!string.IsNullOrEmpty(user))
-            {
-                props.Username = user;
-                props.Password = ConfigurationManager.AppSettings["HistorianPassword"] ?? "";
-            }
+            // One place decides the login: what the user entered, else app.config, else the
+            // Windows session. Reading app.config directly here meant a tester who unzipped the
+            // hand-out package could not connect to a server requiring a login at all, because
+            // the packaged config ships (deliberately) without credentials.
+            HistorianCredentials.ApplyTo(props);
             props.ServerCertificateValidationMode = CertificateValidationMode.None;
             return props;
         }

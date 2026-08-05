@@ -26,6 +26,10 @@ namespace HistorianSyncTool
             // reverts to defaults the first time a tester launches a new build.
             Properties.Settings.Default.UpgradeFromPreviousVersion();
 
+            // After the upgrade (so a remembered login survives an update) and before the first
+            // connect, including the auto-connect that runs as the main form loads.
+            Services.HistorianCredentials.Load();
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Forms.MainForm());

@@ -1440,6 +1440,7 @@ namespace HistorianSyncTool.Forms
             {
                 SetConnectionError();
                 SetStatus(Loc.F("msg.connectFailed", ex.Message), true);
+                _lastConnectWasAuthFailure = HistorianCredentials.LooksLikeAuthFailure(ex);
             }
             finally
             {
@@ -1448,6 +1449,44 @@ namespace HistorianSyncTool.Forms
                 // good address for the main server.
                 RememberConnectedServers();
                 SetBusy(false);
+            }
+
+            // The address was fine and the server simply refused the login. Say so in words the
+            // user can act on and put the login dialog in front of them, rather than leaving
+            // "the server has rejected the client credentials" on screen with no way forward.
+            if (_lastConnectWasAuthFailure)
+            {
+                _lastConnectWasAuthFailure = false;
+                SetStatus(Loc.T("cred.rejected"), true);
+                if (PromptForCredentials()) await ConnectAsync();
+            }
+        }
+
+        /// <summary>Set when a connect failed because the login was refused, not the address.</summary>
+        private bool _lastConnectWasAuthFailure;
+
+        private void btnCredentials_Click(object sender, EventArgs e)
+        {
+            if (BlockedByRunningOperation()) return;
+            if (PromptForCredentials())
+            {
+                // Entering a login is only ever done in order to connect with it.
+                var again = ConnectAsync();
+                GC.KeepAlive(again);
+            }
+        }
+
+        /// <summary>Shows the login dialog. Returns true if the user confirmed it.</summary>
+        private bool PromptForCredentials()
+        {
+            using (var dlg = new CredentialsDialog())
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+                HistorianCredentials.Set(dlg.UserName, dlg.Password, dlg.Remember);
+                Log(string.IsNullOrEmpty(dlg.UserName)
+                    ? "Login cleared — the Windows session will be used."
+                    : $"Login set for '{dlg.UserName}'" + (dlg.Remember ? " (remembered on this PC)." : " (this session only)."));
+                return true;
             }
         }
 

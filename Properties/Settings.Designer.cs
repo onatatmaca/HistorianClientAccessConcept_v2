@@ -241,6 +241,28 @@ namespace HistorianSyncTool.Properties
             set { this["SettingsUpgradeRequired"] = value; }
         }
 
+        /// <summary>Historian login name, if the user chose to remember it. Empty = fall back to
+        /// app.config, then to the Windows session. See <see cref="Services.HistorianCredentials"/>.</summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string HistorianUser
+        {
+            get { return (string)this["HistorianUser"]; }
+            set { this["HistorianUser"] = value; }
+        }
+
+        /// <summary>The password, encrypted with DPAPI for the current Windows user. Useless on
+        /// another machine or to another user, and never present in the hand-out zip.</summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string HistorianPasswordEnc
+        {
+            get { return (string)this["HistorianPasswordEnc"]; }
+            set { this["HistorianPasswordEnc"] = value; }
+        }
+
         /// <summary>
         /// Carry the previous version's saved settings into this build, once.
         ///

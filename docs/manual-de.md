@@ -131,8 +131,20 @@ warum die Verbindung nicht zustande kam. Gespeichert werden nur Adressen, mit de
 Verbindung tatsächlich funktioniert hat — eine vertippte Adresse wird Ihnen nie wieder
 angeboten.
 
-Weisen die Server einen leeren Benutzernamen zurück, tragen Sie die Anmeldedaten einmalig in
-`HistorianSyncTool.exe.config` ein — siehe [Kapitel 8](#8-anhang).
+**Wenn der Server eine Anmeldung verlangt.** Die meisten Historian-Server lassen eine anonyme
+Verbindung nicht zu und antworten mit *„Der Server hat die Client-Anmeldeinformationen
+abgelehnt"*. Das ist kein Problem der Adresse — der Server wurde erreicht, er hat Sie nur nicht
+hereingelassen. Klicken Sie auf **Anmeldung…**, tragen Sie Historian-Benutzername und Kennwort
+ein und verbinden Sie erneut. Für beide Server gilt dieselbe Anmeldung.
+
+Mit **Auf diesem PC merken** entfällt die erneute Eingabe. Das Kennwort wird dann ausschließlich
+für Ihr Windows-Konto verschlüsselt gespeichert: Es ist für andere Benutzer und auf anderen
+Rechnern nicht lesbar und ist nie Bestandteil des ausgelieferten Programmordners.
+
+Bleiben beide Felder leer, wird die Verbindung mit Ihrem Windows-Konto aufgebaut — das ist die
+richtige Wahl, wenn das Programm auf dem Historian-Rechner selbst läuft.
+
+Wird die Anmeldung abgelehnt, bietet das Programm diesen Dialog automatisch an.
 
 ### 5.2 Zeitraum wählen
 

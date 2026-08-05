@@ -296,6 +296,19 @@ namespace HistorianSyncTool.UI
             { "msg.restoreDoneAdv",   new[] { "Restore finished: {0}/{1} batches across {2} point(s), {3} reading(s) written.",
                                               "Wiederherstellung abgeschlossen: {0}/{1} Blöcke über {2} Messstelle(n), {3} Messwert(e) geschrieben." } },
             { "msg.restoreCancelled", new[] { "Restore cancelled.",                      "Wiederherstellung abgebrochen." } },
+            // Historian login. Needed because the delivered package ships without credentials.
+            { "cred.title",           new[] { "Historian login",                         "Historian-Anmeldung" } },
+            { "cred.intro",           new[] { "Enter the user name and password for the two Historian servers. Both servers are accessed with the same login.",
+                                              "Benutzername und Kennwort für die beiden Historian-Server eingeben. Für beide Server wird dieselbe Anmeldung verwendet." } },
+            { "cred.user",            new[] { "User name",                               "Benutzername" } },
+            { "cred.password",        new[] { "Password",                                "Kennwort" } },
+            { "cred.remember",        new[] { "Remember on this PC",                     "Auf diesem PC merken" } },
+            { "cred.hint",            new[] { "The password is stored encrypted for your Windows account only. Leave both fields empty to use your Windows session — that works when the tool runs on the Historian itself.",
+                                              "Das Kennwort wird ausschließlich für Ihr Windows-Konto verschlüsselt gespeichert. Beide Felder leer lassen, um die Windows-Anmeldung zu verwenden — das funktioniert, wenn das Programm auf dem Historian selbst läuft." } },
+            { "cred.ok",              new[] { "Save",                                    "Speichern" } },
+            { "cred.button",          new[] { "Login…",                                  "Anmeldung…" } },
+            { "cred.rejected",        new[] { "The server rejected the login. Enter the Historian user name and password.",
+                                              "Der Server hat die Anmeldung abgelehnt. Bitte Historian-Benutzername und Kennwort eingeben." } },
             // The two confirmations that gate writing to, and deleting from, a production
             // historian. These were the last hardcoded-English dialogs in the app, which is the
             // worst possible pair to leave untranslated for a German operator.
