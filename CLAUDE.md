@@ -92,7 +92,8 @@ All detailed conventions, patterns, and domain knowledge live in `.claude/rules/
 | [`sync-workflow.md`](.claude/rules/sync-workflow.md) | Gap analysis, sync timeline, backfill, preview dialogs |
 | [`scheduling-and-revert.md`](.claude/rules/scheduling-and-revert.md) | Unattended scheduler (Phase 7) + revert/undo journal (Phase 8) |
 | [`known-issues.md`](.claude/rules/known-issues.md) | v2 bugs fixed (phase 8+) + open deferred items |
-| [`known-issues-archive.md`](.claude/rules/known-issues-archive.md) | Resolved v2 issues (phases 5–8) + v1-bug tracking table |
+| [`known-issues-archive.md`](.claude/rules/known-issues-archive.md) | Resolved v2 issues (phases 5–10) + v1-bug tracking table |
+| [`known-issues-utc.md`](.claude/rules/known-issues-utc.md) | The 2026-07-16 UTC-frame incident, its audit, and the one still-open item |
 | [`known-issues-v1.md`](.claude/rules/known-issues-v1.md) | v1 historical pitfalls — reference so v2 doesn't regress |
 | [`roadmap.md`](.claude/rules/roadmap.md) | Phase completion status (8+) and next items |
 | [`roadmap-archive.md`](.claude/rules/roadmap-archive.md) | Completed phases 1–7 |
