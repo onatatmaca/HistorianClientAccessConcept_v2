@@ -120,11 +120,28 @@ red. Both were the same defect — see the measured table in
 - [ ] Compare mode still materialises one row object per sample on both sides; on a year-long
       window that is the same scale problem the tables just shed
 
-- [ ] Parallel code audit (subagents): write/delete safety, UTC boundary, async + cancellation,
-      UI state machine, error handling, resource lifetime, dead code
-- [ ] Live cross-check: every number the app shows verified against an independent read of the
-      Historian (raw reads + SyncPlanner), not against itself
+- [x] Parallel code audit (subagents): write/delete safety, UTC boundary, async + cancellation,
+      UI state machine, error handling, resource lifetime, dead code. **Findings register with
+      the measurements behind each: [`audit-phase13.md`](audit-phase13.md)** — 8 open HIGH items,
+      5 MEDIUM, 4 fixed, one page of verified dead code
+- [x] **The test suite runs headlessly at last** — `tools\run-tests.ps1`, 118 tests in ~0.2 s, no
+      Visual Studio. It had never been in a verification loop, and it was hiding a red test
+      (`GapAnalysisService` left `TotalSamples=0` on the single-sample path). Fixed; 118/118
+- [~] Live cross-check: `probe-crosscheck` re-confirmed Phase 12d exactly (10,080/10,078 raw,
+      5 → mirror, 3 → main) and a new `probe-memory` measured the per-point cost. **But the
+      cross-check probe still computes the pre-12e "segments touched" completeness** — it would
+      confirm a number the app no longer claims. Update it, then re-run against the detail card
 - [ ] Fill test gaps found; all probes green
+
+### The three that must be decided before v1.0 (detail in `audit-phase13.md`)
+- [ ] **The planner would write ~41 k phantom readings on a real pair.** Measured on
+      `TEMPRL_01_BHKW02_SCALE` over a year: match **90.6 %** (just over the threshold) → exact-diff
+      → **21,306 → mirror AND 19,746 → main**. Both directions at once is the independence
+      signature; the threshold alone does not catch it
+- [ ] **Failed reads are presented as empty servers on the write path** — both preview dialogs
+      and `SafeReadTimes`, all three re-introducing the hole `ThrowOnItemErrors` exists to close
+- [ ] **A restore that cannot be journaled still reports success** and is unrevertable — which is
+      exactly what a read-only install folder produces
 
 ## Phase 14 — v1.0 for office testing
 - [ ] Version 1.0.0, installer, single-folder deployment

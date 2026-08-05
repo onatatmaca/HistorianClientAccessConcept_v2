@@ -8,6 +8,9 @@ obj/
 # Packages
 packages/
 
+# MSTest framework + adapter, fetched on demand by tools\run-tests.ps1
+tools/.testpkgs/
+
 # Local copy of the proprietary GE Proficy API DLL (never commit)
 lib/
 

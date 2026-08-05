@@ -318,7 +318,12 @@ namespace HistorianSyncTool.Services
                 Proficy.Historian.ClientAccess.API.DataSet set = new Proficy.Historian.ClientAccess.API.DataSet();
                 set[tagName] = new DataSamples<float>
                 {
-                    Times = times.ToArray(),
+                    // ToApi, like every other method that crosses into the API. This was the
+                    // ONE write/delete path that passed app-frame times straight through, so
+                    // any future caller would have written 1 h early in winter / 2 h in
+                    // summer. It has no caller today, which is exactly why it could sit here
+                    // looking correct.
+                    Times = times.Select(ToApi).ToArray(),
                     Values = values.ToArray(),
                     ImplicitQuality = DataQuality.Good
                 };

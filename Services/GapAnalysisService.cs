@@ -78,6 +78,10 @@ namespace HistorianSyncTool.Services
             {
                 result.HasData = sampleTimes != null && sampleTimes.Count > 0;
                 result.SampleTimes = sampleTimes ?? new List<DateTime>();
+                // Set here too, not only on the >= 2 path below: a one-sample server
+                // otherwise reported HasData=true and CoverageRatio=1.0 alongside
+                // TotalSamples=0 — a result object that contradicts itself.
+                result.TotalSamples = result.SampleTimes.Count;
 
                 // Empty server (0 samples) + defined eval period → treat the entire period
                 // as one gap so the user can backfill from the other side (e.g., Secondary

@@ -26,6 +26,13 @@ namespace HistorianSyncTool.UI.Controls
     /// </summary>
     public class TagOverviewList : Panel
     {
+        /// <summary>
+        /// The row chevron's font. Static because DrawRow runs per visible row on every
+        /// repaint, and this list repaints on hover, wheel and scroll — allocating a Font
+        /// there leaked GDI handles continuously while scrolling.
+        /// </summary>
+        private static readonly Font ChevronFont = new Font("Segoe UI", 12f, FontStyle.Bold);
+
         private const int RowHeight   = 62;
         private const int NameWidth   = 250;
         private const int RightWidth  = 200;
@@ -141,16 +148,20 @@ namespace HistorianSyncTool.UI.Controls
                 verdictColor = AppTheme.Danger;
             }
             using (var br = new SolidBrush(verdictColor))
+            using (var fmt = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
             {
-                var fmt = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
                 fmt.FormatFlags |= StringFormatFlags.NoWrap;
                 g.DrawString(verdict, AppTheme.Bold, br,
                     new RectangleF(rc.Right - RightWidth - 26, rc.Top + 5, RightWidth, 18), fmt);
             }
 
-            // Chevron — this row opens
+            // Chevron — this row opens.
+            // The font is a static, not a per-row allocation: this runs once per VISIBLE ROW
+            // per paint, and the list repaints on every hover change and every wheel notch.
+            // Allocating (and not disposing) a Font here leaked GDI handles by the hundred
+            // while scrolling — and GDI exhaustion is a hard failure, not a slowdown.
             using (var br = new SolidBrush(AppTheme.TextSecondary))
-                g.DrawString("›", new Font("Segoe UI", 12f, FontStyle.Bold), br, rc.Right - 22, rc.Top + 12);
+                g.DrawString("›", ChevronFont, br, rc.Right - 22, rc.Top + 12);
 
             int barLeft  = rc.Left + 10;
             int barWidth = rc.Width - 20 - 44;   // room for the trailing percentages
