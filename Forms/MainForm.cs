@@ -211,16 +211,29 @@ namespace HistorianSyncTool.Forms
         private string[] _browsedSecondaryTags = new string[0];
 
         // ── GridRow model ──────────────────────────────────────────────────────────
+        /// <summary>
+        /// One row of a data table. Deliberately holds RAW values, not formatted strings.
+        ///
+        /// It used to cache the three display strings per row. The grids are virtual, so those
+        /// strings existed only to be thrown away — and at a one-year window on a dense point
+        /// there are millions of rows per server. Measured live: 1,006 MB working set for one
+        /// point, in an x86 process that runs out of address space around 1.2 GB. Formatting in
+        /// CellValueNeeded instead costs nothing (it is called only for cells actually on
+        /// screen) and cuts the per-row footprint from ~150 bytes to ~32.
+        /// </summary>
         private class GridRow
         {
             public DateTime RawTime;
-            public string Timestamp;
-            public string Value;
-            public string Quality;
-            public bool IsSpacer;
+            public float RawValue;
+            public double RawQuality;
+            public bool IsSpacer;      // no reading on this side at this instant (compare mode)
             public bool IsExtra;
             public bool IsMismatch;
         }
+
+        private static string RowTimeText(GridRow r) => r.RawTime.ToString("yyyy-MM-dd HH:mm:ss");
+        private static string RowValueText(GridRow r) => r.IsSpacer ? "" : r.RawValue.ToString("G6");
+        private string RowQualityText(GridRow r) => r.IsSpacer ? "" : QualityText(r.RawQuality);
 
         // ── Colors ─────────────────────────────────────────────────────────────────
         private static readonly Color ColorSpacer   = Color.FromArgb(245, 245, 245);
@@ -440,20 +453,16 @@ namespace HistorianSyncTool.Forms
             finally { ResumeLayout(true); }
         }
 
-        /// <summary>Re-maps the loaded samples so the Quality column matches the view mode.</summary>
+        /// <summary>
+        /// Re-renders the Quality column for the current view mode (OK/uncertain/bad vs the
+        /// exact percentage). Rows hold raw values now, so this is a repaint — it used to
+        /// rebuild every row object, which on a large window meant re-allocating millions of
+        /// them just because a checkbox changed.
+        /// </summary>
         private void RebuildGridRowsForViewMode()
         {
-            if (_isCompareMode) return;   // compare mode owns its own row building
-            if (_rawPrimarySamples != null)
-            {
-                _primaryRows = SamplesToGridRows(_rawPrimarySamples);
-                UpdateGridRowCount(gridPrimary, _primaryRows.Count);
-            }
-            if (_rawSecondarySamples != null)
-            {
-                _secondaryRows = SamplesToGridRows(_rawSecondarySamples);
-                UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
-            }
+            gridPrimary.Invalidate();
+            gridSecondary.Invalidate();
         }
 
         // ── All-points overview (Phase 12b) ────────────────────────────────────────
@@ -799,9 +808,9 @@ namespace HistorianSyncTool.Forms
             var row = _primaryRows[e.RowIndex];
             switch (e.ColumnIndex)
             {
-                case 0: e.Value = row.Timestamp; break;
-                case 1: e.Value = row.Value;     break;
-                case 2: e.Value = row.Quality;   break;
+                case 0: e.Value = RowTimeText(row);    break;
+                case 1: e.Value = RowValueText(row);   break;
+                case 2: e.Value = RowQualityText(row); break;
             }
         }
 
@@ -811,9 +820,9 @@ namespace HistorianSyncTool.Forms
             var row = _secondaryRows[e.RowIndex];
             switch (e.ColumnIndex)
             {
-                case 0: e.Value = row.Timestamp; break;
-                case 1: e.Value = row.Value;     break;
-                case 2: e.Value = row.Quality;   break;
+                case 0: e.Value = RowTimeText(row);    break;
+                case 1: e.Value = RowValueText(row);   break;
+                case 2: e.Value = RowQualityText(row); break;
             }
         }
 
@@ -1191,10 +1200,9 @@ namespace HistorianSyncTool.Forms
         {
             return samples.Select(s => new GridRow
             {
-                RawTime   = s.Time,
-                Timestamp = s.Time.ToString("yyyy-MM-dd HH:mm:ss"),
-                Value     = s.Value.ToString("G6"),
-                Quality   = QualityText(s.Quality)
+                RawTime    = s.Time,
+                RawValue   = s.Value,
+                RawQuality = s.Quality
             }).ToList();
         }
 
@@ -1254,17 +1262,15 @@ namespace HistorianSyncTool.Forms
                     priAligned.Add(new GridRow
                     {
                         RawTime   = pTime,
-                        Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                        Value     = priSamples[i].Value.ToString("G6"),
-                        Quality   = QualityText(priSamples[i].Quality),
+                        RawValue   = priSamples[i].Value,
+                        RawQuality = priSamples[i].Quality,
                         IsMismatch = mismatch
                     });
                     secAligned.Add(new GridRow
                     {
                         RawTime   = sTime,
-                        Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                        Value     = secSamples[j].Value.ToString("G6"),
-                        Quality   = QualityText(secSamples[j].Quality),
+                        RawValue   = secSamples[j].Value,
+                        RawQuality = secSamples[j].Quality,
                         IsMismatch = mismatch
                     });
                     i++; j++;
@@ -1275,15 +1281,13 @@ namespace HistorianSyncTool.Forms
                     priAligned.Add(new GridRow
                     {
                         RawTime   = pTime,
-                        Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                        Value     = priSamples[i].Value.ToString("G6"),
-                        Quality   = QualityText(priSamples[i].Quality),
+                        RawValue   = priSamples[i].Value,
+                        RawQuality = priSamples[i].Quality,
                         IsExtra   = true
                     });
                     secAligned.Add(new GridRow
                     {
                         RawTime   = pTime,
-                        Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
                         IsSpacer  = true
                     });
                     i++;
@@ -1294,15 +1298,13 @@ namespace HistorianSyncTool.Forms
                     priAligned.Add(new GridRow
                     {
                         RawTime   = sTime,
-                        Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
                         IsSpacer  = true
                     });
                     secAligned.Add(new GridRow
                     {
                         RawTime   = sTime,
-                        Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                        Value     = secSamples[j].Value.ToString("G6"),
-                        Quality   = QualityText(secSamples[j].Quality),
+                        RawValue   = secSamples[j].Value,
+                        RawQuality = secSamples[j].Quality,
                         IsExtra   = true
                     });
                     j++;
@@ -1315,13 +1317,13 @@ namespace HistorianSyncTool.Forms
                 var pTime = priSamples[i].Time;
                 priAligned.Add(new GridRow
                 {
-                    RawTime = pTime, Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                    Value = priSamples[i].Value.ToString("G6"), Quality = QualityText(priSamples[i].Quality),
+                    RawTime = pTime,
+                    RawValue = priSamples[i].Value, RawQuality = priSamples[i].Quality,
                     IsExtra = true
                 });
                 secAligned.Add(new GridRow
                 {
-                    RawTime = pTime, Timestamp = pTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                    RawTime = pTime,
                     IsSpacer = true
                 });
                 i++;
@@ -1333,13 +1335,13 @@ namespace HistorianSyncTool.Forms
                 var sTime = secSamples[j].Time;
                 priAligned.Add(new GridRow
                 {
-                    RawTime = sTime, Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                    RawTime = sTime,
                     IsSpacer = true
                 });
                 secAligned.Add(new GridRow
                 {
-                    RawTime = sTime, Timestamp = sTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                    Value = secSamples[j].Value.ToString("G6"), Quality = QualityText(secSamples[j].Quality),
+                    RawTime = sTime,
+                    RawValue = secSamples[j].Value, RawQuality = secSamples[j].Quality,
                     IsExtra = true
                 });
                 j++;
@@ -3542,7 +3544,7 @@ namespace HistorianSyncTool.Forms
             }
         }
 
-        private static void ExportRowsToCsv(string path, List<GridRow> rows)
+        private void ExportRowsToCsv(string path, List<GridRow> rows)
         {
             using (var sw = new System.IO.StreamWriter(path, false, System.Text.Encoding.UTF8))
             {
@@ -3550,7 +3552,7 @@ namespace HistorianSyncTool.Forms
                 foreach (var row in rows)
                 {
                     if (row.IsSpacer) continue;
-                    sw.WriteLine($"\"{row.Timestamp}\",\"{row.Value}\",\"{row.Quality}\"");
+                    sw.WriteLine($"\"{RowTimeText(row)}\",\"{RowValueText(row)}\",\"{RowQualityText(row)}\"");
                 }
             }
         }
