@@ -230,7 +230,10 @@ function ConvertBody([string[]]$lines, [string]$lang){
 }
 
 function CoverAndToc([string]$lang, [string]$title){
-    $logo = Join-Path $work 'word\media\image46.jpeg'
+    # The clean logo supplied for the cover; the template's own small header logo (image46)
+    # keeps running in the page header, exactly as in the original document.
+    $logo = Join-Path $docs 'img\ormatic-logo.png'
+    if(-not (Test-Path $logo)){ $logo = Join-Path $work 'word\media\image46.jpeg' }
     $sb = New-Object Text.StringBuilder
     [void]$sb.Append('<w:p/><w:p/>')
     [void]$sb.Append((ImageParagraph $logo 2200000))

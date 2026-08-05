@@ -67,7 +67,7 @@ if (Test-Path $cfg) {
 
 # --- documentation ------------------------------------------------------------------------
 $docs = Join-Path $repo 'docs'
-foreach ($d in @('Manual-EN.html', 'Handbuch-DE.html')) {
+foreach ($d in @('Handbuch-DE.docx', 'Manual-EN.docx', 'Manual-EN.html', 'Handbuch-DE.html')) {
     $p = Join-Path $docs $d
     if (Test-Path $p) { Copy-Item $p $stage }
     else { Write-Host "  (note: $d not built yet)" -ForegroundColor Yellow }

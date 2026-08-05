@@ -945,10 +945,15 @@ namespace HistorianSyncTool.Forms
             txtSecondary.Text = _demoMode ? "DEMO-MIRROR" : s.SecondaryHostname;
             txtTagnameFilter.Text = s.TagnameFilter;
 
-            dtpStart.Value = s.StartDate > DateTime.MinValue
-                ? s.StartDate : DateTime.Now.AddMonths(-1);
-            dtpEnd.Value = s.EndDate > DateTime.MinValue && s.EndDate > s.StartDate
-                ? s.EndDate : DateTime.Now;
+            // Always start on the last 24 hours, whatever was saved last time.
+            //
+            // The saved range used to be restored verbatim, and a range someone left at
+            // "2025-01-01 -> now" means the first thing the app does after connecting is read
+            // eighteen months of every measurement point - minutes of waiting before the user
+            // has asked for anything. A day is instant, it is what someone opening the tool
+            // almost always wants to see, and widening it is one click on the presets.
+            dtpEnd.Value   = DateTime.Now;
+            dtpStart.Value = DateTime.Now.AddDays(-1);
         }
 
         /// <summary>Maximum remembered server addresses. Long enough for a site with several
