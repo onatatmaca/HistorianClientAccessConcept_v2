@@ -1,15 +1,12 @@
-# HANDOFF — mid-Phase-12d (2026-08-05)
+# HANDOFF — after Phase 12d (2026-08-05)
 
 Live continuation note. Delete this file when Phase 14 ships.
 
 ## Where things stand
 
-Committed through **`dd1306f`** ("Fix the two defects from the second review"). Working tree
-has **uncommitted, half-finished Phase 12d work that does NOT compile yet** — see below.
-
-`bin\Debug` = last full build. All screenshot/probe work builds to **`bin\DebugDemo`**
-(`/p:OutputPath=bin\DebugDemo\`) because the user often has the app open, which locks
-`bin\Debug`.
+**Phase 12d is complete, committed and verified live.** The working tree is clean and the
+build is green. Next up: **Phase 13 (audit)**, then **Phase 14 (v1.0 + installer + docs)** —
+see [`roadmap.md`](roadmap.md).
 
 ## Build / verify commands
 
@@ -18,76 +15,69 @@ dotnet msbuild HistorianSyncTool.csproj /p:Configuration=Debug /p:Platform=x86 ^
   /p:OutputPath=bin\DebugDemo\ /p:ReferencePath=<repo>\lib /v:minimal /nologo
 ```
 
-Screenshot (never CopyFromScreen — it captures the user's own windows):
-`scratchpad\shot.ps1 -Out name.png [-Demo] -WaitMs 26000`
+Always build to **`bin\DebugDemo`** — the user usually has their own instance running from
+`bin\Debug`, which locks that output. Kill only processes whose command line contains
+`DebugDemo`; `bin\Debug` is theirs.
 
-Probes (32-bit PowerShell; the exe is x86). All READ-ONLY:
-- `probe-scanner.ps1` — CoverageScanner against the demo pair (15 checks)
-- `probe-pointcoverage.ps1` — PointCoverage arithmetic (16 checks)
-- `probe-live-count.ps1` — live count-query correctness + scan timing
-- `probe-sparse.ps1` — overview estimate vs SyncPlanner truth, per point
-- `probe-b2.ps1` / `probe-b2-verify.ps1` — the two completeness definitions
+Screenshots (never `CopyFromScreen` — it captures the user's own windows; these use
+`PrintWindow(PW_RENDERFULLCONTENT)`, which needs neither focus nor the foreground):
+- `scratchpad\shot.ps1 -Out name.png [-Demo] -WaitMs 26000`
+- `scratchpad\click-shot.ps1 -Out name.png [-Demo|-Attach] -Type "x,y=text" -Clicks "x,y;x,y"`
+  — clicks are PostMessage'd to the control under the point, so the real mouse is never moved.
+  Coordinates are in the same frame as the screenshots. `-Attach` drives the already-running
+  DebugDemo instance instead of starting one.
+- `scratchpad\shot-dialog.ps1 -Match "Measured values"` — modal dialogs are separate HWNDs and
+  are not covered by the main-window capture.
 
-Run: `/c/Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe -NoProfile -File '<path>'`
+Probes now live IN THE REPO at **`tools/probes/`** with a README — the session scratchpad does
+not survive a new session, and the old copies carried credentials inline. `_connect.ps1` reads
+credentials from `bin\DebugDemo\HistorianSyncTool.exe.config` (gitignored) or `HIST_USER` /
+`HIST_PASS`, and servers from `HIST_MAIN` / `HIST_MIRROR` (default .186 / .187, port 13000).
+All READ-ONLY by rule; **ASCII only** (PowerShell 5.1 reads a `.ps1` as ANSI without a BOM, so
+an em-dash is a parse error).
 
-Live servers 192.168.50.186 (main) / .187 (mirror), port 13000, `ormatic`/`orc`.
-Credentials live in `bin\DebugDemo\HistorianSyncTool.exe.config` (gitignored). The probes
-carry them inline because ConfigurationManager in a PowerShell host reads powershell.exe.config.
+```
+C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -NoProfile -File tools\probes\<probe>.ps1
+```
 
-## Phase 12d — DONE so far (uncommitted)
+- `probe-onesided.ps1` — are the "not set up on this server" verdicts true?
+- `probe-crosscheck.ps1` — every number the detail card prints vs an independent read
+  (`-Tag`, `-From`, `-To`)
 
-- **U1** `UI/Controls/ValueChart.cs` rewritten: two stacked plots (main above, mirror below),
-  shared value scale, per-plot missing shading, grid labels inside on white backing, `Large`
-  property, `CopyTo(other)`.
-- **U2** `Forms/ChartDialog.cs` NEW — enlarged, resizable, Escape/Close. Designer adds
-  `lnkEnlarge` to the chart header.
-- **U3** "Load data" buttons removed from the Designer (`btnReadPrimary`/`btnReadSecondary`
-  fields, creation, `ApplyTexts` lines, caption row 56px→26px).
-- **U6 (part)** `txtPrimary`/`txtSecondary` are now `ComboBox` (`MakeHostCombo`).
-- **U7** back button is a `FlatButton` (was a faint LinkLabel); detail header 28→34px.
-- Chart panel 168→214, timeline 236→200. Grid captions non-bold + AutoEllipsis (a 33-char
-  point name was clipping to 32 with no ellipsis — that is what made ".F_CV" read as ".F_C").
-- `UI/Loc.cs`: `chart.enlarge`, `chart.enlargedTitle`, `grid.emptyNotOnServer`,
-  `grid.emptyNoReadings`.
+Still only in the session scratchpad, worth porting when next needed: `probe-scanner.ps1`,
+`probe-pointcoverage.ps1`, `probe-live-count.ps1`, `probe-sparse.ps1`.
 
-## Phase 12d — REMAINING (do these first; the build is broken until they are done)
+## Before launching the app against the live servers
 
-1. **csproj**: add `<Compile Include="Forms\ChartDialog.cs" />`.
-2. **MainForm.cs**: add `lnkEnlarge_Click` →
-   `using (var d = new ChartDialog(chart, _pointPrimary)) d.ShowDialog(this);`
-3. **MainForm.cs**: delete `btnReadPrimary_Click` / `btnReadSecondary_Click` and remove
-   `btnReadPrimary, btnReadSecondary` from the `_actionButtons` list (they no longer exist).
-4. **U4**: in `ApplyViewMode`, stop hiding `btnCompare` and `btnSyncScroll` — the user wants
-   both in the simple view. (Delete the two `SetShown(...)` lines so they stay visible.)
-5. **U5**: two fields `_emptyMsgPrimary` / `_emptyMsgSecondary`, set in `ShowSelectedPoint`
-   and the read methods; the grid `Paint` handlers in the Designer draw them instead of the
-   fixed `Loc.T("grid.emptyPrimary")`. Three states:
-   no point → `grid.emptyPrimary`; point not on that server → `grid.emptyNotOnServer`;
-   point present but zero readings → `grid.emptyNoReadings`.
-   (`_pointOnMain` / `_pointOnMirror` already exist and are set in `OpenPoint`.)
-6. **U6 (rest)**: `Settings.ServerHistory` (string, semicolon-separated). Load into both
-   combos' `Items` at startup; after a successful connect add both hosts (de-duplicated,
-   most-recent-first, cap ~10) and `Save()`.
-7. Build → `shot.ps1 -Demo` → verify → also verify live → commit.
+Check `%LOCALAPPDATA%\HistorianSyncTool\...\user.config`: `ScheduleEnabled` and
+`ScheduleRunOnStartup` must both be `False`, or auto-connect on startup will fire a real
+unattended restore. They were False on 2026-08-05.
 
-## Then: Phase 13 (audit) and Phase 14 (v1.0 + docs) — see roadmap.md
+## Phase 14 — still open
 
 .NET Framework 4.8 is installed on all office machines (confirmed by the user), so the
-installer does not need to bundle it. Still open: whether to bundle the Proficy ClientAccess
-DLL or require the Historian client — ask before building the installer.
+installer does not need to bundle it. **Still to ask before building the installer:** bundle
+the Proficy ClientAccess DLL, or require the Historian client to be installed?
 
 ## Hard-won facts — do not relearn these
 
-- **Verify against the Historian, never against the app.** Three "bugs" this session were
-  bugs in my probe, and the two real ones only appeared against live plant data. Demo data
-  is too regular to expose them.
-- PowerShell traps: a C# `ValueTuple`'s field NAMES do not exist at runtime (`$s.Time` is
-  null — use `$s.Item1`); `[int]` ROUNDS, it does not truncate (use `[Math]::Floor`);
-  `[Math]::Max(1, <long>)` binds to Int32 and overflows.
+- **Verify against the Historian, never against the app.** Several "bugs" have turned out to be
+  bugs in the probe, and the real ones only appeared against live plant data — demo data is too
+  regular to expose them. `probe-crosscheck.ps1` is the pattern: read raw, run the planner
+  yourself, compare with what the screen printed.
+- PowerShell traps: a C# `ValueTuple`'s field NAMES do not exist at runtime (`$s.Time` is null —
+  use `$s.Item1`); `[int]` ROUNDS, it does not truncate (use `[Math]::Floor`);
+  `[Math]::Max(1, <long>)` binds to Int32 and overflows; `New-Object HashSet[string]` cannot take
+  (collection, comparer) — construct with the comparer and `Add` in a loop; `ITags.Query`'s
+  `out` parameter will not bind from PowerShell — use `HistorianDataService.BrowseTags`.
+- `git commit -m @'…'@` does not parse inside a `;`-chained PowerShell command — write the
+  message to a file and use `-F`.
 - `Control.Visible` returns EFFECTIVE visibility — false for every child before the form is
   shown. Never read it for layout decisions; `_hiddenByViewMode` + `IsShown()` exist for this.
 - A hidden ComboBox reports no selection at all. The selected point is explicit app state
   (`_pointPrimary` / `_pointSecondary`), never read back off a combo.
+- **A server that lacks a point is not a server holding nothing.** Both cards must agree; see
+  the Phase 12d entry in `known-issues.md`. A read of a nonexistent tag throws `InvalidTagname`.
 - The overview estimate is calibrated against SyncPlanner — see the measured table in
   `known-issues.md`. Any change to it must be re-measured with `probe-sparse.ps1` on LIVE data.
 - Internal labels `"Primary"` / `"Secondary"` are load-bearing (journal, ScheduleDirection,

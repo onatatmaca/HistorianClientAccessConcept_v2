@@ -43,6 +43,44 @@ It remains a **lower bound** (1 817 of a true 2 915) and is labelled as such on 
 drill-down recomputes with `SyncPlanner`, which stays the only thing that decides what a
 restore writes.
 
+## BUG: a one-sided point was offered a restore it could never deliver (fixed Phase 12d)
+**Location:** `Forms/MainForm.cs` · `RunGapAnalysis`, `BuildTrack`, `UpdateGapAnalysisUI`
+
+Opening a point that exists on only ONE server showed the other server at 0 % and the right
+panel offered to restore every reading into it (19,086 in the demo). The all-points list
+already **excluded** one-sided points from its totals — "the tool writes readings, it does
+not create measurement points" — so the two cards gave different answers for the same point.
+On the live rig that is not a corner case: **201 of 273 points are one-sided.**
+
+Root cause: `hasPrimary`/`hasSecondary` only asked whether the server was CONNECTED, so a
+server without the point looked like a server holding nothing. `GapAnalysisService` emits one
+whole-period gap for an empty server and `SyncPlanner` then sees "target empty, source full"
+→ copy everything.
+
+**Fix:** `hasPrimary &= _pointOnMain`, `hasSecondary &= _pointOnMirror` — a server that lacks
+the point is not read, not planned and not counted; the track, the empty table and the
+summary all say "not set up on this server". Presence is trusted only for names that came
+from a browse (`SetPointPresence`), so a hand-typed name is never hidden behind a false
+"not set up" — that failure would be worse than the number it replaced.
+
+**Measured on the Historian, not on the app** (2026-08-05, `probe-onesided.ps1`): an exact
+browse for `STAT6.CH4_01_H2S.F_CV` returns **0 hits on main, 1 on the mirror**, and a read on
+main throws **`InvalidTagname`** — the restore was undeliverable, not merely pointless. Of 47
+one-sided points sampled, 0 returned data on the other server. The write path was never at
+risk: it offers only the intersection of both servers (`TryGetSharedTags`).
+
+## BUG: button captions clipped mid-word, silently (fixed Phase 12d)
+**Location:** `UI/Controls/FlatButton.cs`
+
+A plain WinForms `Button` clips overflowing text with no ellipsis, so in Advanced/German
+"← Auf Hauptserver kopieren" rendered as "← Auf Hauptserver" and "Vorschau &&
+wiederherstellen…" as "Vorschau &" — the same silent-truncation class as the Phase 12a
+caption bug. `FlatButton` now measures the painted text (`&&` → `&`) and shrinks the font to
+fit down to 7.25 pt, with `AutoEllipsis` as the last resort so overflow is at least VISIBLE.
+Advanced also gives the action column 196 px instead of 156 and shortens the chart, because
+its second button group plus the activity log did not fit at all and the bottom-docked repair
+group was losing its header off the top.
+
 ## BUG: "restored by this tool" band drawn 1–2 h off (fixed Phase 12a)
 **Location:** `Forms/MainForm.cs` · `LoadBackfilledRanges`
 
@@ -131,43 +169,12 @@ read-back) — fails safe (deletes nothing, but the message would be optimistic)
 
 ---
 
-## BUG: Coverage collapsed on deadband tags — median-based gap rule (fixed Phase 10)
-**Location:** `GapAnalysisService.Analyze`
-
-Real plant tag TEMP_02_WS logs every ~6 min (median) but normally stays quiet 30–60 min
-(deadband). `threshold = max(median×1.5, 120s)` ≈ 9.5 min flagged every normal quiet
-period → 41% coverage shown for a healthy tag. **Fix:** per-tag rule =
-`max(p90(intervals) × GapThresholdMultiplier, MinimumGapSeconds)` — if ≥10% of a tag's
-intervals reach a duration, that duration is its cadence. The `Percentile` index is
-capped below the max so a lone real outage in a sparse window can't masquerade as
-cadence. Rule shown on each timeline track ("gap rule: silence > 1h 0m"). Verified
-live: TEMP_02_WS now 100%/100% on the exact window that showed 41%.
-
-## BUG: Exact-second diff = phantom copies on redundant collectors (fixed Phase 10)
-**Location:** everywhere the whole-second diff ran → new `Services/SyncPlanner`
-
-The two plant servers collect INDEPENDENTLY — same values logged seconds apart
-(offsets 5–120s). The exact-second diff reported them all as "missing": measured live,
-GASDRUCK_01_GAA showed 33,376 of 47,474 samples "missing" when ~98 genuinely were;
-TEMP_02_WS showed 707 where 599 had an identical-value partner within 30s. A backfill
-would have permanently interleaved both collectors' streams (double density, both
-directions, every tag). **Fix:** `SyncPlanner.Plan` auto-detects per tag:
-exact-second match rate ≥90% ⇒ aligned streams (same-source data, e.g. HistSync or
-tool-written) → keep exact diff (catches isolated misses); otherwise → copy ONLY
-source samples inside real TARGET OUTAGES (silence > the tag's own gap rule).
-ExecuteBackfill, both preview dialogs, the amber strip and the missing-data table all
-use the same planner — every surface shows what a backfill would actually write.
-
-## BUG: ReadRawInRange paged to the archive end + server cursor-leak trap (fixed Phase 10)
-**Location:** `HistorianDataService.ReadRawInRange`
-
-Despite the Phase 9 claim, it still ran `RawByTimeQuery` to the END of the archive and
-clipped client-side (a 13-day window on the 2-year Genthin archive read ~50× too much).
-The naive fix — breaking out of the pagination early — LEAKS a server-side cursor per
-abandoned query until expiry (verified live: "Maximum number of cached items exceeded",
-which then fails later queries too). **Fix:** bounded `RawByNumberQuery` chunks
-(5000/call, each drained), stopping at the range end. Never abandon a paged RawByTime
-query — that applies to any script touching the API as well.
+## Phase 10 bugs — moved to [`known-issues-archive.md`](known-issues-archive.md)
+Resolved and stable: the median-based gap rule that collapsed coverage on deadband tags, the
+exact-second diff that reported phantom copies on independently-collecting redundant servers
+(→ `SyncPlanner`), and `ReadRawInRange` paging to the end of the archive plus the server
+cursor-leak trap. **Never abandon a paged RawByTime query** — that one applies to any script
+touching the API too.
 
 ## DOC FIX: IData.Add's second argument is errorOnReplace, not "allowOutOfOrder"
 Verified by reflecting the v1.6.1.0 DLL: `Add(DataSet dataset, Boolean errorOnReplace,

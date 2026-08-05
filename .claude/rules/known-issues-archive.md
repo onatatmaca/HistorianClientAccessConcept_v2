@@ -1,4 +1,4 @@
-# Known Issues — v2 Archive (Phases 5–6, resolved & stable)
+﻿# Known Issues — v2 Archive (Phases 5–6, resolved & stable)
 
 Resolved v2 issues old enough that they no longer change day-to-day work, moved here
 from `known-issues.md` to keep that file under 200 lines. Newer items (Phase 8+) stay
@@ -17,23 +17,15 @@ per-tag with `threshold = max(median × 1.5, MinimumGapSeconds)`; the floor then
 isolated missing samples, so the **final fix** decoupled backfill from gap windows
 entirely: backfill diffs actual timestamps between servers; gap analysis is display-only.
 
-## BUG: DateTimePicker Shows Arrows Instead of Calendar (fixed Phase 5)
-`MakeDtp()` had `ShowUpDown = true`; changed to `false`.
-
-## BUG: Gap Grid Duration Column Cut Off (fixed Phase 5)
-Grid used `FillWeight` without `AutoSizeColumnsMode = Fill`; added it.
-
-## DESIGN: No UI Refresh After Backfill (fixed Phase 5/6)
-Added `AutoRefreshAfterBackfill()` → re-runs gap analysis (Phase 5) and re-reads the
-data grids + exits compare mode (Phase 6).
-
-## BUG: Verification failure was counted as success (fixed Phase 6)
-`BatchesSucceeded++` ran before `VerifyWrite`; now gated on `writeOk && verifyOk`;
-verification failure increments `BatchesFailed`.
-
-## BUG: CancellationTokenSource leaked per operation (fixed Phase 6)
-Every handler allocated a new CTS without disposing the old; `ResetCts()` disposes
-then re-allocates, `OnFormClosing` disposes the final one.
+## One-liners (fixed Phase 5/6)
+- **DateTimePicker showed arrows, not a calendar** — `MakeDtp()` had `ShowUpDown = true`.
+- **Gap grid Duration column cut off** — `FillWeight` without `AutoSizeColumnsMode = Fill`.
+- **No UI refresh after backfill** — `AutoRefreshAfterBackfill()` re-runs the analysis, re-reads
+  the data grids and exits compare mode.
+- **Verification failure counted as success** — `BatchesSucceeded++` ran before `VerifyWrite`;
+  now gated on `writeOk && verifyOk`, and a failed verify increments `BatchesFailed`.
+- **CancellationTokenSource leaked per operation** — every handler allocated a new CTS without
+  disposing the old; `ResetCts()` disposes then re-allocates, `OnFormClosing` disposes the last.
 
 ## BUG: Empty-server side blocked backfill (fixed Phase 6)
 `Analyze` returned early with no gaps for a 0-sample server, so nothing was offered
@@ -138,6 +130,33 @@ when the tool runs on the Historian box itself).
 
 ---
 
+
+## Phase 10 items (moved from known-issues.md, Phase 12d)
+
+## BUG: Coverage collapsed on deadband tags — median-based gap rule (fixed Phase 10)
+`GapAnalysisService.Analyze`. TEMP_02_WS logs every ~6 min (median) but normally stays quiet
+30–60 min (deadband), so `max(median×1.5, 120s)` ≈ 9.5 min flagged every normal quiet period →
+**41 % coverage on a healthy tag**. Fix: `max(p90(intervals) × GapThresholdMultiplier,
+MinimumGapSeconds)` — if ≥10 % of a tag's intervals reach a duration, that duration is its
+cadence. The percentile index is capped below the max so one real outage in a sparse window
+cannot masquerade as cadence. Verified live: 41 % → 100 %/100 % on the same window.
+
+## BUG: Exact-second diff = phantom copies on redundant collectors (fixed Phase 10)
+The two plant servers collect INDEPENDENTLY — the same values logged 5–120 s apart — so an
+exact-second diff called them all "missing": measured live, GASDRUCK_01_GAA showed **33,376 of
+47,474** samples missing when ~98 genuinely were. A backfill would have permanently interleaved
+both collectors' streams, in both directions, on every tag. Fix: `SyncPlanner.Plan` auto-detects
+per tag — exact-second match ≥90 % ⇒ aligned streams → exact diff (catches isolated misses);
+otherwise → copy only source samples inside real TARGET OUTAGES. Every surface uses the planner,
+so they all report what a restore would actually write.
+
+## BUG: ReadRawInRange paged to the archive end + cursor-leak trap (fixed Phase 10)
+It ran `RawByTimeQuery` to the END of the archive and clipped client-side (a 13-day window on
+the 2-year Genthin archive read ~50× too much). The naive fix — breaking out of the pagination
+early — **leaks a server-side cursor** per abandoned query until expiry ("Maximum number of
+cached items exceeded", which then fails later queries too). Fix: bounded `RawByNumberQuery`
+chunks (5000/call, each drained), stopping at the range end. **Never abandon a paged RawByTime
+query** — including in throwaway scripts.
 # Bugs Fixed vs v1 (historical tracking table, moved from roadmap.md)
 
 | Bug | Phase Fixed | Notes |
