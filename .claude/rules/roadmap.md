@@ -192,30 +192,33 @@ UI a technician or a manager understands, with the technical surface one switch 
 ---
 
 ## Phase 12d — second UI review (2026-08-05) 🔴 IN PROGRESS
+> Mid-flight state and the exact remaining steps: [`HANDOFF.md`](HANDOFF.md).
 Boss review of the live build. Two defects first — both make the app show WRONG numbers.
 
 ### Defects
-- [ ] **B1 — opening a point that exists on one server only shows the WRONG point's data.**
+- [x] **B1 — opening a point that exists on one server only showed the WRONG point's data.**
       Reproduced: `STAT6.V_EIN_02_MB02.F_CV` (mirror-only) opens with the main table full of
       readings from the previously selected point, under a caption naming the new one. Root
       cause to confirm: `SyncCombo` silently does nothing when the point is not in that
       server's list, so `_pointPrimary/_pointSecondary` and the combo disagree, and the async
       `SelectedIndexChanged` can then overwrite the explicit selection.
-- [ ] **B2 — the same point reports two different completeness figures.** List says 74.5 % /
+- [x] **B2 — the same point reported two different completeness figures.** List says 74.5 % /
       77.3 %, opening it says 32.9 % / 33.9 %. They are two different definitions (segment-fill
       vs the p90 gap rule) wearing the same label and the same colours. Must be reconciled or
       renamed — verify against raw data first, then decide.
 
 ### UI
-- [ ] **U1** Value chart: two stacked charts (main above, mirror below) like the completeness
+- [x] **U1** Value chart: two stacked charts (main above, mirror below) like the completeness
       bars, taller, no overlapping axis labels/legend
-- [ ] **U2** "Enlarge" button on the chart → large closable window
-- [ ] **U3** Remove the "Load data — main/mirror" buttons; loading is automatic
+- [x] **U2** "Enlarge" button on the chart → large closable window (`Forms/ChartDialog`)
+- [x] **U3** Remove the "Load data — main/mirror" buttons; loading is automatic
 - [ ] **U4** Link scrolling + Compare available in the simple view too
 - [ ] **U5** Empty table must say "this server holds nothing in this period", not "choose a
       measurement point", when a point IS selected
 - [ ] **U6** Server fields: editable, saved, remembered, with a dropdown of previous entries
-- [ ] **U7** "‹ All measurement points" made prominent (button, not a faint link)
+- [x] **U7** "‹ All measurement points" made prominent (button, not a faint link)
+- [x] **U8** Point-name captions were clipping a 33-char name to 32 with no ellipsis —
+      that is why ".F_CV" read as ".F_C" in the screenshots. Non-bold + AutoEllipsis
 
 ## Phase 13 — full audit before shipping
 - [ ] Parallel code audit (subagents): write/delete safety, UTC boundary, async + cancellation,
