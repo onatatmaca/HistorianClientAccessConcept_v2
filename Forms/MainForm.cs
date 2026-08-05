@@ -73,6 +73,12 @@ namespace HistorianSyncTool.Forms
         private string _pointPrimary   = "";
         private string _pointSecondary = "";
 
+        /// <summary>Whether the open point is configured on each server. False means "this
+        /// server does not have this point at all" — which must read differently on screen
+        /// from "this server has the point but no readings in this period".</summary>
+        private bool _pointOnMain   = true;
+        private bool _pointOnMirror = true;
+
         /// <summary>Reads the point name off a combo the user can actually see/type in.</summary>
         private static string PointName(ComboBox combo)
         {
@@ -481,10 +487,15 @@ namespace HistorianSyncTool.Forms
         /// </summary>
         private async Task OpenPoint(string point)
         {
-            _pointPrimary = point;
-            SyncCombo(cboPrimary, point);
-            if (_tagLinkEnabled) TryMirrorTagSelection(cboPrimary, cboSecondary);
-            else { _pointSecondary = point; SyncCombo(cboSecondary, point); }
+            // Opening a point from the list means BOTH sides look at that point — including
+            // when one server does not have it at all. Anything else leaves the two halves of
+            // the screen describing different points.
+            _pointPrimary   = point;
+            _pointSecondary = point;
+            _pointOnMain    = _onMain.Count   == 0 || _onMain.Contains(point);
+            _pointOnMirror  = _onMirror.Count == 0 || _onMirror.Contains(point);
+            SyncCombo(cboPrimary,   point);
+            SyncCombo(cboSecondary, point);
 
             ShowDetailCard(point);
             await ShowSelectedPoint();
@@ -1353,21 +1364,36 @@ namespace HistorianSyncTool.Forms
             return available[0];
         }
 
-        /// <summary>Moves a combo onto <paramref name="point"/> without raising the auto-read chain.</summary>
+        /// <summary>
+        /// Moves a combo onto <paramref name="point"/> without raising the auto-read chain.
+        ///
+        /// When the point does not exist on that server the combo is CLEARED and shows the name
+        /// anyway. Leaving it on its previous selection was a real defect: opening a mirror-only
+        /// point left the main combo on the point before it, and the late-arriving
+        /// SelectedIndexChanged then wrote that stale name back over the explicit selection —
+        /// so the main table filled with a DIFFERENT point's readings under the new point's
+        /// caption. Verified on STAT6.V_EIN_02_MB02.F_CV.
+        /// </summary>
         private void SyncCombo(ComboBox combo, string point)
         {
             if (combo == null || string.IsNullOrWhiteSpace(point)) return;
+
+            int match = -1;
             for (int i = 0; i < combo.Items.Count; i++)
             {
                 var t = combo.Items[i] as Tag;
                 string name = t != null ? t.Name : combo.Items[i]?.ToString();
-                if (!string.Equals(name, point, StringComparison.OrdinalIgnoreCase)) continue;
-
-                _suppressAutoRead = true;
-                try { combo.SelectedIndex = i; combo.Text = point; }
-                finally { _suppressAutoRead = false; }
-                return;
+                if (string.Equals(name, point, StringComparison.OrdinalIgnoreCase)) { match = i; break; }
             }
+
+            _suppressAutoRead = true;
+            try
+            {
+                if (match >= 0) combo.SelectedIndex = match;
+                else            combo.SelectedIndex = -1;   // never leave a stale other point
+                combo.Text = point;
+            }
+            finally { _suppressAutoRead = false; }
         }
 
         /// <summary>
@@ -1436,8 +1462,13 @@ namespace HistorianSyncTool.Forms
             if (_suppressAutoRead || _isBusy) return;
             if (!_connections.IsPrimaryConnected) return;
 
-            _pointPrimary = PointName(cboPrimary);   // the user just changed it
-            if (string.IsNullOrWhiteSpace(_pointPrimary)) return;
+            // The user picked something. Ignore a late notification that merely repeats what
+            // is already selected — those arrive after SyncCombo and used to overwrite it.
+            string pickedPri = PointName(cboPrimary);
+            if (string.IsNullOrWhiteSpace(pickedPri) || pickedPri == _pointPrimary) return;
+            _pointPrimary  = pickedPri;
+            _pointOnMain   = true;
+            _pointOnMirror = _onMirror.Count == 0 || _onMirror.Contains(pickedPri);
 
             // Linked mode: auto-select the identical tag on the secondary side too
             bool mirrored = _tagLinkEnabled && !_isLinkPropagating
@@ -1501,8 +1532,11 @@ namespace HistorianSyncTool.Forms
             if (_suppressAutoRead || _isBusy) return;
             if (!_connections.IsSecondaryConnected) return;
 
-            _pointSecondary = PointName(cboSecondary);   // the user just changed it
-            if (string.IsNullOrWhiteSpace(_pointSecondary)) return;
+            string pickedSec = PointName(cboSecondary);
+            if (string.IsNullOrWhiteSpace(pickedSec) || pickedSec == _pointSecondary) return;
+            _pointSecondary = pickedSec;
+            _pointOnMirror  = true;
+            _pointOnMain    = _onMain.Count == 0 || _onMain.Contains(pickedSec);
 
             bool mirrored = _tagLinkEnabled && !_isLinkPropagating
                 && TryMirrorTagSelection(cboSecondary, cboPrimary);
@@ -1589,16 +1623,15 @@ namespace HistorianSyncTool.Forms
 
             if (_tagLinkEnabled) TryMirrorTagSelection(cboPrimary, cboSecondary);
 
-            if (_connections.IsPrimaryConnected)
-            {
-                UpdateGridHeaders();
-                await ReadPrimaryData();
-            }
-            if (_connections.IsSecondaryConnected && !string.IsNullOrWhiteSpace(_pointSecondary))
-            {
-                UpdateGridHeaders();
-                await ReadSecondaryData();
-            }
+            // A server that does not have this point is not read at all — its table says so
+            // rather than showing the previous point's readings.
+            if (_connections.IsPrimaryConnected && _pointOnMain)   await ReadPrimaryData();
+            else { _rawPrimarySamples = new List<(DateTime, float, double)>(); _primaryRows.Clear(); UpdateGridRowCount(gridPrimary, 0); }
+
+            if (_connections.IsSecondaryConnected && _pointOnMirror) await ReadSecondaryData();
+            else { _rawSecondarySamples = new List<(DateTime, float, double)>(); _secondaryRows.Clear(); UpdateGridRowCount(gridSecondary, 0); }
+
+            UpdateGridHeaders();
 
             DateTime from = dtpStart.Value, to = dtpEnd.Value;
             if (from < to) await RunGapAnalysis(from, to);
@@ -2702,6 +2735,7 @@ namespace HistorianSyncTool.Forms
                 List<DiffSummaryRow> diffRows = null;
                 List<CopyableSegment> copyable = null;
                 string stripNote = null;
+                double priCoverage = -1, secCoverage = -1;
                 var priFill = new List<TimeRange>(); var priUnfill = new List<TimeRange>();
                 var secFill = new List<TimeRange>(); var secUnfill = new List<TimeRange>();
                 List<TimeRange> priBack = null, secBack = null;
@@ -2776,19 +2810,28 @@ namespace HistorianSyncTool.Forms
                             SyncPlanner.Plan(secOnSecondary, secOnPrimary, from, to, floor, mult));
                     }
 
-                    // Timeline tracks: split each gap window into red (the other server
-                    // HAS this data → copyable) and gray (missing on both → unfillable)
-                    // segments, using the per-batch feasibility marks.
-                    if (priResult != null)
-                        foreach (var gapW in priResult.Gaps)
-                            IntervalBuilder.SplitByFeasibility(gapW, priFill, priUnfill);
-                    if (secResult != null)
-                        foreach (var gapW in secResult.Gaps)
-                            IntervalBuilder.SplitByFeasibility(gapW, secFill, secUnfill);
-                    // Feasibility unknown (other side not read) → don't claim "missing on
-                    // both"; show plain missing (red) instead.
-                    if (!priFeasKnown) { priFill.AddRange(priUnfill); priUnfill.Clear(); }
-                    if (!secFeasKnown) { secFill.AddRange(secUnfill); secUnfill.Clear(); }
+                    // Timeline tracks — segment based, so this screen and the all-points list
+                    // answer the SAME question about the SAME point.
+                    //
+                    // The old version coloured these from the p90 gap rule. Measured on
+                    // STAT6.TEMPVL_02_BHKW01_SCALE.F_CV over 29 days: the list said 74.3 %
+                    // (its data ends when the archive ends) while this screen said 32.2 %,
+                    // because the rule counted 573 normal quiet periods (median interval 30 s,
+                    // rule "silence > 580 s") as 19.7 days of missing data. Both were
+                    // arithmetically right and answered different questions under one label.
+                    //
+                    // Now: green = the server holds readings in that segment, grey = NEITHER
+                    // does (nothing to copy), red = exactly what SyncPlanner would copy here.
+                    // Red therefore means "this will be restored", which is what the legend
+                    // has always claimed. The p90 rule stays for the Advanced track caption.
+                    int segs = TimelineSegments(from, to);
+                    priCoverage = SegmentCoverage(priOnPrimary,   from, to, segs);
+                    secCoverage = SegmentCoverage(secOnSecondary, from, to, segs);
+                    var bothEmpty = BothEmptySegments(priOnPrimary, secOnSecondary, from, to, segs);
+                    priUnfill.AddRange(bothEmpty);
+                    secUnfill.AddRange(bothEmpty);
+                    if (planToPri != null) priFill.AddRange(MergeToRanges(planToPri.ToCopy, from, to, segs));
+                    if (planToSec != null) secFill.AddRange(MergeToRanges(planToSec.ToCopy, from, to, segs));
 
                     // Copy-candidates strip (only meaningful when both sides show one tag):
                     // exactly the samples the planner would copy — nothing phantom.
@@ -2814,8 +2857,8 @@ namespace HistorianSyncTool.Forms
                 _lastSecondaryResult = secResult;
                 _lastDiffRows        = diffRows ?? new List<DiffSummaryRow>();
 
-                var priTrack = BuildTrack(priResult, ServerNaming.PrimaryLabel, priHost, priFeasKnown, priFill, priUnfill, priBack);
-                var secTrack = BuildTrack(secResult, ServerNaming.SecondaryLabel, secHost, secFeasKnown, secFill, secUnfill, secBack);
+                var priTrack = BuildTrack(priResult, ServerNaming.PrimaryLabel, priHost, priFeasKnown, priFill, priUnfill, priBack, priCoverage);
+                var secTrack = BuildTrack(secResult, ServerNaming.SecondaryLabel, secHost, secFeasKnown, secFill, secUnfill, secBack, secCoverage);
                 UpdateGapAnalysisUI(from, to, priTrack, secTrack, copyable, stripNote);
 
                 // The value curve is drawn from the SAME samples the tables below are showing
@@ -2833,6 +2876,106 @@ namespace HistorianSyncTool.Forms
             catch (OperationCanceledException) { SetStatus(Loc.T("msg.checkCancelled")); }
             catch (Exception ex) { SetStatus(Loc.F("msg.checkFailed", ex.Message), true); }
             finally { SetBusy(false); }
+        }
+
+        // ── Segment maths shared with the all-points overview ──────────────────────
+        // The list and this screen MUST agree about the same point, so both split the window
+        // the same way and both call a segment "covered" when it holds at least one reading.
+
+        /// <summary>Segment count for the timeline — same rule the overview scan uses.</summary>
+        private int TimelineSegments(DateTime from, DateTime to)
+        {
+            int width = timeline.Width > 0 ? timeline.Width : 800;
+            return Math.Max(120, Math.Min(600, width));
+        }
+
+        /// <summary>Fraction of segments in which this server holds at least one reading.</summary>
+        private static double SegmentCoverage(List<DateTime> times, DateTime from, DateTime to, int segments)
+        {
+            if (times == null) return -1;
+            var filled = FillMap(times, from, to, segments);
+            int with = 0;
+            for (int i = 0; i < segments; i++) if (filled[i]) with++;
+            return (double)with / segments;
+        }
+
+        private static bool[] FillMap(List<DateTime> times, DateTime from, DateTime to, int segments)
+        {
+            var map = new bool[segments];
+            long span = (to - from).Ticks;
+            if (span <= 0 || times == null) return map;
+            long step = Math.Max(1, span / segments);
+            foreach (var t in times)
+            {
+                long off = t.Ticks - from.Ticks;
+                if (off < 0) continue;
+                int i = (int)(off / step);
+                if (i >= segments) i = segments - 1;
+                map[i] = true;
+            }
+            return map;
+        }
+
+        /// <summary>Segments where NEITHER server holds anything — nothing to copy, drawn grey.</summary>
+        private static List<TimeRange> BothEmptySegments(List<DateTime> a, List<DateTime> b,
+            DateTime from, DateTime to, int segments)
+        {
+            var result = new List<TimeRange>();
+            if (a == null || b == null) return result;   // unknown, do not claim "missing on both"
+            var fa = FillMap(a, from, to, segments);
+            var fb = FillMap(b, from, to, segments);
+            long span = (to - from).Ticks;
+            long step = Math.Max(1, span / segments);
+
+            int runStart = -1;
+            for (int i = 0; i <= segments; i++)
+            {
+                bool empty = i < segments && !fa[i] && !fb[i];
+                if (empty) { if (runStart < 0) runStart = i; }
+                else if (runStart >= 0)
+                {
+                    result.Add(new TimeRange(
+                        from.AddTicks(runStart * step),
+                        from.AddTicks(Math.Min(span, (long)i * step))));
+                    runStart = -1;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>Merges the planner's copy timestamps into drawable ranges, snapped to the
+        /// segment grid so a single reading is still visible.</summary>
+        private static List<TimeRange> MergeToRanges(List<DateTime> points, DateTime from, DateTime to, int segments)
+        {
+            var result = new List<TimeRange>();
+            if (points == null || points.Count == 0) return result;
+            long span = (to - from).Ticks;
+            if (span <= 0) return result;
+            long step = Math.Max(1, span / segments);
+
+            var hit = new bool[segments];
+            foreach (var p in points)
+            {
+                long off = p.Ticks - from.Ticks;
+                if (off < 0) continue;
+                int i = (int)(off / step);
+                if (i >= segments) i = segments - 1;
+                hit[i] = true;
+            }
+            int runStart = -1;
+            for (int i = 0; i <= segments; i++)
+            {
+                bool on = i < segments && hit[i];
+                if (on) { if (runStart < 0) runStart = i; }
+                else if (runStart >= 0)
+                {
+                    result.Add(new TimeRange(
+                        from.AddTicks(runStart * step),
+                        from.AddTicks(Math.Min(span, (long)i * step))));
+                    runStart = -1;
+                }
+            }
+            return result;
         }
 
         /// <summary>Reads raw sample times for a tag; returns empty list on failure (e.g. tag missing).</summary>
@@ -2906,7 +3049,7 @@ namespace HistorianSyncTool.Forms
         /// <summary>Packs one server's analysis into the data the timeline track needs.</summary>
         private TimelineTrackData BuildTrack(GapAnalysisResult result, string sideLabel, string host,
             bool feasibilityKnown, List<TimeRange> fillable, List<TimeRange> unfillable,
-            List<TimeRange> backfilled)
+            List<TimeRange> backfilled, double segmentCoverage)
         {
             // sideLabel is the INTERNAL role ("Primary"/"Secondary"); everything the user
             // sees goes through ServerNaming.
@@ -2934,7 +3077,9 @@ namespace HistorianSyncTool.Forms
             {
                 Label            = $"{who} · {tag}" + (result.HasData ? rule : "  (" + Loc.T("timeline.noData") + ")"),
                 TooltipName      = ServerNaming.Short(sideLabel, host),
-                CoverageRatio    = result.HasData ? result.CoverageRatio : 0.0,
+                // Segment coverage, the SAME measure the all-points list shows for this
+                // point — not the p90 gap rule, which answers a different question.
+                CoverageRatio    = result.HasData ? (segmentCoverage >= 0 ? segmentCoverage : result.CoverageRatio) : 0.0,
                 HasData          = result.HasData,
                 FeasibilityKnown = feasibilityKnown,
                 FillableGaps     = fillable   ?? new List<TimeRange>(),
