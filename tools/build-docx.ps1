@@ -37,11 +37,17 @@ function Runs([string]$text){
     $text = [regex]::Replace($text, '\[([^\]]+)\]\(([^)]+)\)', '$1')
     $text = [regex]::Replace($text, '!\[[^\]]*\]\([^)]+\)', '')
     # split on bold / code, keeping the delimiters
-    $parts = [regex]::Split($text, '(\*\*[^*]+\*\*|`[^`]+`)')
+    # Single-asterisk italics too. Without them the asterisks were printed literally in the
+    # middle of sentences - *"Der Server hat die Client-Anmeldeinformationen abgelehnt"* - which
+    # is what the stray characters in the manual were. Bold is matched first so ** never
+    # degrades into two italics.
+    $parts = [regex]::Split($text, '(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)')
     foreach($p in $parts){
         if(-not $p){ continue }
         if($p -match '^\*\*(.+)\*\*$'){
             [void]$sb.Append('<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">' + (Esc $matches[1]) + '</w:t></w:r>')
+        } elseif($p -match '^\*(.+)\*$'){
+            [void]$sb.Append('<w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve">' + (Esc $matches[1]) + '</w:t></w:r>')
         } elseif($p -match '^`(.+)`$'){
             [void]$sb.Append('<w:r><w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">' + (Esc $matches[1]) + '</w:t></w:r>')
         } else {
@@ -51,8 +57,17 @@ function Runs([string]$text){
     return $sb.ToString()
 }
 function Para([string]$text, [string]$style = $null, [switch]$Italic, [switch]$Center){
+    # Element order inside w:pPr is fixed by the schema: pStyle, keepNext, keepLines, spacing,
+    # ind, jc, rPr. Out of order, Word rejects the whole document as corrupt.
     $pPr = '<w:pPr>'
     if($style){ $pPr += '<w:pStyle w:val="' + $style + '"/>' }
+    if($style -like 'berschrift*'){
+        # A heading must never be left stranded at the foot of a page with its text overleaf.
+        $pPr += '<w:keepNext/><w:keepLines/>'
+    }
+    if($style -like 'berschrift*'){ $pPr += '<w:spacing w:before="200" w:after="80"/>' }
+    elseif($style -eq 'Beschriftung'){ $pPr += '<w:keepLines/><w:spacing w:before="40" w:after="160"/>' }
+    else { $pPr += '<w:spacing w:after="100" w:line="240" w:lineRule="auto"/>' }
     if($Center){ $pPr += '<w:jc w:val="center"/>' }
     if($Italic){ $pPr += '<w:rPr><w:i/></w:rPr>' }
     $pPr += '</w:pPr>'
@@ -82,7 +97,7 @@ function ImageParagraph([string]$file, [int]$maxWidthEmu){
     $script:docPrId++
     $id = $script:docPrId
     return @"
-<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>
+<w:p><w:pPr><w:keepNext/><w:spacing w:before="80" w:after="20"/><w:jc w:val="center"/></w:pPr><w:r><w:drawing>
 <wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
 <wp:extent cx="$cx" cy="$cy"/><wp:effectExtent l="0" t="0" r="0" b="0"/>
 <wp:docPr id="$id" name="Picture $id"/><wp:cNvGraphicFramePr/>
@@ -105,21 +120,25 @@ function TableXml([string[]]$header, [System.Collections.ArrayList]$rows){
     foreach($e in @('top','left','bottom','right','insideH','insideV')){
         [void]$sb.Append('<w:' + $e + ' w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>')
     }
-    [void]$sb.Append('</w:tblBorders><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="90" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>')
+    # Fixed layout + tight margins. Left to itself Word autofits to the content and the tables
+    # sprawl across the page for no reason.
+    [void]$sb.Append('</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="70" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="70" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>')
     for($i=0;$i -lt $cols;$i++){ [void]$sb.Append('<w:gridCol w:w="' + $cw + '"/>') }
     [void]$sb.Append('</w:tblGrid>')
     # header row: shaded and repeated on every page
     [void]$sb.Append('<w:tr><w:trPr><w:tblHeader/></w:trPr>')
     foreach($h in $header){
         [void]$sb.Append('<w:tc><w:tcPr><w:tcW w:w="' + $cw + '" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="EAEFF4"/></w:tcPr>' +
-            '<w:p><w:pPr><w:rPr><w:b/></w:rPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">' + (Esc ($h -replace '\*\*','')) + '</w:t></w:r></w:p></w:tc>')
+            '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:b/><w:sz w:val="17"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="17"/></w:rPr><w:t xml:space="preserve">' + (Esc ($h -replace '\*\*','')) + '</w:t></w:r></w:p></w:tc>')
     }
     [void]$sb.Append('</w:tr>')
     foreach($row in $rows){
         [void]$sb.Append('<w:tr>')
         for($i=0;$i -lt $cols;$i++){
             $cell = if($i -lt $row.Count){ $row[$i] } else { '' }
-            [void]$sb.Append('<w:tc><w:tcPr><w:tcW w:w="' + $cw + '" w:type="dxa"/></w:tcPr><w:p>' + (Runs $cell) + '</w:p></w:tc>')
+            [void]$sb.Append('<w:tc><w:tcPr><w:tcW w:w="' + $cw + '" w:type="dxa"/></w:tcPr>' +
+                '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:sz w:val="17"/></w:rPr></w:pPr>' +
+                ((Runs $cell) -replace '<w:r>(?!<w:rPr)', '<w:r><w:rPr><w:sz w:val="17"/></w:rPr>') + '</w:p></w:tc>')
         }
         [void]$sb.Append('</w:tr>')
     }
@@ -128,7 +147,39 @@ function TableXml([string[]]$header, [System.Collections.ArrayList]$rows){
 }
 
 # ---------------------------------------------------------------- markdown -> body
+# The markdown is hard-wrapped at about 95 characters for readability in git. Emitting one Word
+# paragraph per LINE was the single biggest defect in the generated manual: it produced a short
+# stub paragraph every 95 characters (hence the great gaps of white space), and it split
+# sentences - and cross-references like [5.1](#...) - across paragraph boundaries, which is
+# where the broken-looking text came from. Rewrap first: consecutive plain-text lines are one
+# paragraph. Structural lines (headings, tables, lists, quotes, images, code, rules) are left
+# exactly as they are.
+function Rewrap([string[]]$lines){
+    $out = New-Object System.Collections.ArrayList
+    $buf = $null
+    $inCode = $false
+    function IsStructural([string]$s){
+        return ($s.Trim() -eq '' -or $s -match '^\s*(#|\||>|```|!\[|---+\s*$)' -or
+                $s -match '^\s*[-*]\s+' -or $s -match '^\s*\d+\.\s+' -or $s -match '^\*[^*].*\*$')
+    }
+    foreach($ln in $lines){
+        if($ln -match '^```'){ $inCode = -not $inCode
+            if($buf){ [void]$out.Add($buf); $buf = $null }
+            [void]$out.Add($ln); continue }
+        if($inCode){ [void]$out.Add($ln); continue }
+        if(IsStructural $ln){
+            if($buf){ [void]$out.Add($buf); $buf = $null }
+            [void]$out.Add($ln)
+        } else {
+            if($buf){ $buf = $buf.TrimEnd() + ' ' + $ln.Trim() } else { $buf = $ln.Trim() }
+        }
+    }
+    if($buf){ [void]$out.Add($buf) }
+    return $out.ToArray()
+}
+
 function ConvertBody([string[]]$lines, [string]$lang){
+    $lines = Rewrap $lines
     $contentEmu = 5760000
     $sb = New-Object Text.StringBuilder
     $inCode = $false; $codeBuf = @()
