@@ -35,6 +35,16 @@ namespace HistorianSyncTool.Services
         public static string Username { get; private set; }
         public static string Password { get; private set; }
 
+        /// <summary>
+        /// The two servers do not have to share an account. A redundant pair is often
+        /// administered separately, and a mirror in another domain may well need its own login.
+        /// When false, <see cref="Username"/> is used for both.
+        /// </summary>
+        public static bool SeparateMirrorLogin { get; private set; }
+
+        public static string MirrorUsername { get; private set; }
+        public static string MirrorPassword { get; private set; }
+
         /// <summary>True when a login will be sent (rather than the Windows session).</summary>
         public static bool HasLogin => !string.IsNullOrEmpty(Username);
 
@@ -45,6 +55,10 @@ namespace HistorianSyncTool.Services
         /// <summary>Call once at startup, before the first connect.</summary>
         public static void Load()
         {
+            SeparateMirrorLogin = Settings.Default.HistorianSeparateMirrorLogin;
+            MirrorUsername = Settings.Default.HistorianUserMirror;
+            MirrorPassword = Unprotect(Settings.Default.HistorianPasswordMirrorEnc);
+
             string savedUser = Settings.Default.HistorianUser;
             if (!string.IsNullOrEmpty(savedUser))
             {
@@ -72,30 +86,54 @@ namespace HistorianSyncTool.Services
         /// Use these credentials for the next connect. <paramref name="remember"/> stores them
         /// for this Windows user; otherwise they live only until the program closes.
         /// </summary>
-        public static void Set(string username, string password, bool remember)
+        public static void Set(string username, string password, bool remember,
+                               bool separateMirror = false,
+                               string mirrorUsername = null, string mirrorPassword = null)
         {
             Username = string.IsNullOrWhiteSpace(username) ? null : username.Trim();
             Password = Username == null ? null : (password ?? "");
             Source = Username == null ? "none" : (remember ? "saved" : "session");
 
+            SeparateMirrorLogin = separateMirror && !string.IsNullOrWhiteSpace(mirrorUsername);
+            MirrorUsername = SeparateMirrorLogin ? mirrorUsername.Trim() : null;
+            MirrorPassword = SeparateMirrorLogin ? (mirrorPassword ?? "") : null;
+
             if (remember && Username != null)
             {
                 Settings.Default.HistorianUser = Username;
                 Settings.Default.HistorianPasswordEnc = Protect(Password);
+                Settings.Default.HistorianSeparateMirrorLogin = SeparateMirrorLogin;
+                Settings.Default.HistorianUserMirror = MirrorUsername ?? "";
+                Settings.Default.HistorianPasswordMirrorEnc =
+                    SeparateMirrorLogin ? Protect(MirrorPassword) : "";
             }
             else
             {
                 // Explicitly clear, so "do not remember" also forgets what was stored before.
                 Settings.Default.HistorianUser = "";
                 Settings.Default.HistorianPasswordEnc = "";
+                Settings.Default.HistorianSeparateMirrorLogin = false;
+                Settings.Default.HistorianUserMirror = "";
+                Settings.Default.HistorianPasswordMirrorEnc = "";
             }
             Settings.Default.Save();
         }
 
-        /// <summary>Applies the current login to a connection, if there is one.</summary>
-        public static void ApplyTo(Proficy.Historian.ClientAccess.API.ConnectionProperties props)
+        /// <summary>
+        /// Applies the login for ONE server. <paramref name="isMirror"/> selects the mirror's own
+        /// account when the user said the two servers differ; otherwise both get the same login.
+        /// </summary>
+        public static void ApplyTo(Proficy.Historian.ClientAccess.API.ConnectionProperties props,
+                                   bool isMirror)
         {
-            if (props == null || !HasLogin) return;
+            if (props == null) return;
+            if (isMirror && SeparateMirrorLogin && !string.IsNullOrEmpty(MirrorUsername))
+            {
+                props.Username = MirrorUsername;
+                props.Password = MirrorPassword ?? "";
+                return;
+            }
+            if (!HasLogin) return;
             props.Username = Username;
             props.Password = Password ?? "";
         }

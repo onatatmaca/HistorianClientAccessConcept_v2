@@ -132,6 +132,19 @@ answer *"the server has rejected the client credentials"*. That is not a problem
 address — the server was reached, it just would not let you in. Click **Login…**, enter the
 Historian user name and password, and connect again. The same login is used for both servers.
 
+![The login dialog](img/02-login-en.png)
+
+*The login dialog: **1** user name · **2** password · **3** tick if the mirror needs its own
+account · **4** remember it on this PC · **5** save and connect.*
+
+**If the two servers have different accounts.** A redundant pair is often administered
+separately, and the mirror may sit in another domain. Tick **The mirror uses a different login**
+and a second user name and password appear for the mirror alone.
+
+![Separate login for the mirror](img/03-login-two-en.png)
+
+*With the box ticked, the mirror server gets its own login (**1**).*
+
 Tick **Remember on this PC** to avoid retyping it. The password is then stored encrypted for
 your Windows account only: it cannot be read by another user or on another computer, and it is
 never part of the delivered program folder.

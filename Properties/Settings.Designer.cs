@@ -263,6 +263,37 @@ namespace HistorianSyncTool.Properties
             set { this["HistorianPasswordEnc"] = value; }
         }
 
+        /// <summary>True when the mirror server has its own account rather than sharing the
+        /// main server's login.</summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool HistorianSeparateMirrorLogin
+        {
+            get { return (bool)this["HistorianSeparateMirrorLogin"]; }
+            set { this["HistorianSeparateMirrorLogin"] = value; }
+        }
+
+        /// <summary>The mirror server's own login name, when it differs.</summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string HistorianUserMirror
+        {
+            get { return (string)this["HistorianUserMirror"]; }
+            set { this["HistorianUserMirror"] = value; }
+        }
+
+        /// <summary>The mirror server's password, DPAPI-encrypted for the current Windows user.</summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string HistorianPasswordMirrorEnc
+        {
+            get { return (string)this["HistorianPasswordMirrorEnc"]; }
+            set { this["HistorianPasswordMirrorEnc"] = value; }
+        }
+
         /// <summary>
         /// Carry the previous version's saved settings into this build, once.
         ///

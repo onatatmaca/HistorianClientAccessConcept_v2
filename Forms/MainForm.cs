@@ -1482,7 +1482,8 @@ namespace HistorianSyncTool.Forms
             using (var dlg = new CredentialsDialog())
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return false;
-                HistorianCredentials.Set(dlg.UserName, dlg.Password, dlg.Remember);
+                HistorianCredentials.Set(dlg.UserName, dlg.Password, dlg.Remember,
+                    dlg.SeparateMirror, dlg.MirrorUserName, dlg.MirrorPassword);
                 Log(string.IsNullOrEmpty(dlg.UserName)
                     ? "Login cleared — the Windows session will be used."
                     : $"Login set for '{dlg.UserName}'" + (dlg.Remember ? " (remembered on this PC)." : " (this session only)."));

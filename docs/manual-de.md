@@ -137,6 +137,20 @@ abgelehnt"*. Das ist kein Problem der Adresse — der Server wurde erreicht, er 
 hereingelassen. Klicken Sie auf **Anmeldung…**, tragen Sie Historian-Benutzername und Kennwort
 ein und verbinden Sie erneut. Für beide Server gilt dieselbe Anmeldung.
 
+![Der Anmeldedialog](img/02-login-en.png)
+
+*Der Anmeldedialog: **1** Benutzername · **2** Kennwort · **3** anhaken, wenn der Spiegel ein
+eigenes Konto benötigt · **4** auf diesem PC merken · **5** speichern und verbinden.*
+
+**Wenn die beiden Server unterschiedliche Konten haben.** Ein redundantes Paar wird häufig
+getrennt verwaltet, und der Spiegel kann in einer anderen Domäne stehen. Haken Sie **Der Spiegel
+verwendet eine andere Anmeldung** an — dann erscheinen Benutzername und Kennwort für den Spiegel
+gesondert.
+
+![Eigene Anmeldung für den Spiegel](img/03-login-two-en.png)
+
+*Mit gesetztem Haken erhält der Spiegelserver eine eigene Anmeldung (**1**).*
+
 Mit **Auf diesem PC merken** entfällt die erneute Eingabe. Das Kennwort wird dann ausschließlich
 für Ihr Windows-Konto verschlüsselt gespeichert: Es ist für andere Benutzer und auf anderen
 Rechnern nicht lesbar und ist nie Bestandteil des ausgelieferten Programmordners.

@@ -13,14 +13,16 @@ namespace HistorianSyncTool.Services
         /// empty usernames; left empty, the Windows session is used (the normal case when
         /// the tool runs on the Historian box itself).
         /// </summary>
-        private static ConnectionProperties BuildProperties(string hostname)
+        private static ConnectionProperties BuildProperties(string hostname, bool isMirror)
         {
             var props = new ConnectionProperties { ServerHostName = hostname };
             // One place decides the login: what the user entered, else app.config, else the
             // Windows session. Reading app.config directly here meant a tester who unzipped the
             // hand-out package could not connect to a server requiring a login at all, because
             // the packaged config ships (deliberately) without credentials.
-            HistorianCredentials.ApplyTo(props);
+            // The two servers may be administered separately and need different accounts, so the
+            // side has to be known here - it is not always the same login.
+            HistorianCredentials.ApplyTo(props, isMirror);
             props.ServerCertificateValidationMode = CertificateValidationMode.None;
             return props;
         }
@@ -67,7 +69,7 @@ namespace HistorianSyncTool.Services
             if (string.IsNullOrWhiteSpace(hostInput))
                 throw new ArgumentException("Hostname cannot be empty.", nameof(hostInput));
             DisconnectPrimary();
-            _primary = Open(hostInput);
+            _primary = Open(hostInput, isMirror: false);
             PrimaryHostname = hostInput.Trim();
         }
 
@@ -77,7 +79,7 @@ namespace HistorianSyncTool.Services
             if (string.IsNullOrWhiteSpace(hostInput))
                 throw new ArgumentException("Hostname cannot be empty.", nameof(hostInput));
             DisconnectSecondary();
-            _secondary = Open(hostInput);
+            _secondary = Open(hostInput, isMirror: true);
             SecondaryHostname = hostInput.Trim();
         }
 
@@ -88,14 +90,14 @@ namespace HistorianSyncTool.Services
         /// relaxes ONLY the WCF DNS-identity comparison — hostname connects keep the
         /// full vendor-stock security path.
         /// </summary>
-        private static ServerConnection Open(string hostInput)
+        private static ServerConnection Open(string hostInput, bool isMirror)
         {
             var (host, port) = HostInputParser.Parse(hostInput);
             if (host.Length == 0)
                 throw new ArgumentException("Hostname cannot be empty.", nameof(hostInput));
 
             ProficyEndpoint.SetPortForNextConnect(port);
-            var props = BuildProperties(host);
+            var props = BuildProperties(host, isMirror);
             var conn = new ServerConnection(props);
             if (HostInputParser.IsIpAddress(host))
                 ProficyEndpoint.PrepareForIp(conn, props);
