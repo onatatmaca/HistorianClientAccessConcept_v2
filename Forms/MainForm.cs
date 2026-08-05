@@ -79,6 +79,37 @@ namespace HistorianSyncTool.Forms
         private bool _pointOnMain   = true;
         private bool _pointOnMirror = true;
 
+        /// <summary>
+        /// What an EMPTY data table says, per server. An empty table used to always read
+        /// "choose a measurement point" — which is a lie once a point IS open, and hid the
+        /// two answers the user actually needs: the point does not exist on this server, or
+        /// it exists and simply recorded nothing in this period. Derived in
+        /// <see cref="UpdateEmptyMessages"/>; the grids' Paint handlers only render it.
+        /// </summary>
+        private string _emptyMsgPrimary   = Loc.T("grid.emptyPrimary");
+        private string _emptyMsgSecondary = Loc.T("grid.emptySecondary");
+
+        /// <summary>Set when the last read for the open point did not complete (error or
+        /// cancel). A failed read leaves the table empty, and an empty table must not claim
+        /// the server holds nothing.</summary>
+        private bool _readFailedPrimary;
+        private bool _readFailedSecondary;
+
+        /// <summary>
+        /// Records which servers this point is CONFIGURED on. Presence is only known for names
+        /// that came from a browse: a name typed by hand that neither list knows is no evidence
+        /// at all, so both sides are assumed present and the read decides. Getting this wrong in
+        /// the pessimistic direction would hide a real point behind "not set up here".
+        /// </summary>
+        private void SetPointPresence(string point)
+        {
+            bool onMain   = _onMain.Contains(point);
+            bool onMirror = _onMirror.Contains(point);
+            bool known    = onMain || onMirror;
+            _pointOnMain   = !known || onMain;
+            _pointOnMirror = !known || onMirror;
+        }
+
         /// <summary>Reads the point name off a combo the user can actually see/type in.</summary>
         private static string PointName(ComboBox combo)
         {
@@ -254,7 +285,7 @@ namespace HistorianSyncTool.Forms
             _actionButtons = new List<Control>
             {
                 btnConnect, btnBrowseTags, btnGetStats,
-                btnReadPrimary, btnReadSecondary, btnCompare,
+                btnCompare,
                 btnCopyToPrimary, btnCopyToSecondary,
                 btnAnalyzeGaps, btnBackfillPreview, btnHistory,
                 btnTagLink
@@ -377,10 +408,11 @@ namespace HistorianSyncTool.Forms
 
                 RelayoutTagsSection();
 
-                // Centre: the activity log and the row-by-row comparison are the technical view.
-                SetShown(pnlLog,        _advanced);
-                SetShown(btnCompare,    _advanced);
-                SetShown(btnSyncScroll, _advanced);
+                // Centre: only the activity log is Advanced-only now. Compare and linked
+                // scrolling stay in the simple view (boss review 2026-08-05) — reading the
+                // two tables side by side is what a technician actually does, and having to
+                // find a switch first to scroll them together made no sense.
+                SetShown(pnlLog, _advanced);
 
                 // The guarded restore + undo history are always available (right panel).
                 // The per-direction copies and the two-direction preview are Advanced extras
@@ -391,6 +423,16 @@ namespace HistorianSyncTool.Forms
                 SetShown(pnlBackfillGroup,   _advanced);
                 SetShown(hdrBackfill,        _advanced);
                 SizeActionGroups();
+
+                // Advanced puts a SECOND button group and the activity log into the same
+                // centre column. With the tall two-plot chart there was no room left: the
+                // bottom-docked repair group lost its header off the top and the German
+                // labels ("← Auf Hauptserver kopieren") were cut mid-word with no ellipsis —
+                // the same silent truncation the second review flagged on the captions.
+                // So Advanced trades chart height and grid width for the surface it adds;
+                // the simple view keeps the big chart, which is what it is for.
+                pnlChart.Height = _advanced ? 118 : 214;
+                pnlGrids.ColumnStyles[1].Width = _advanced ? 196 : 156;
 
                 // Quality reads "OK / uncertain / bad" in the simple view and as a percentage
                 // in Advanced, so the loaded tables have to be re-rendered.
@@ -475,6 +517,17 @@ namespace HistorianSyncTool.Forms
             await ScanOverview(TimeSpan.Zero);
         }
 
+        /// <summary>
+        /// Opens the value chart in its own, much larger window. It gets a COPY of the data
+        /// already on screen — no server is contacted, so this can never disagree with the
+        /// tables or cost the user a query.
+        /// </summary>
+        private void lnkEnlarge_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new ChartDialog(chart, _pointPrimary))
+                dlg.ShowDialog(this);
+        }
+
         private async void lstOverview_PointActivated(string point)
         {
             if (_isBusy || string.IsNullOrWhiteSpace(point)) return;
@@ -492,8 +545,8 @@ namespace HistorianSyncTool.Forms
             // the screen describing different points.
             _pointPrimary   = point;
             _pointSecondary = point;
-            _pointOnMain    = _onMain.Count   == 0 || _onMain.Contains(point);
-            _pointOnMirror  = _onMirror.Count == 0 || _onMirror.Contains(point);
+            SetPointPresence(point);
+            _readFailedPrimary = _readFailedSecondary = false;   // a new point, not yet tried
             SyncCombo(cboPrimary,   point);
             SyncCombo(cboSecondary, point);
 
@@ -853,6 +906,10 @@ namespace HistorianSyncTool.Forms
         private void LoadSettings()
         {
             var s = Settings.Default;
+
+            // Both server fields offer everything that has connected before. Items first,
+            // then the text — the last-used pair stays what the app opens with.
+            LoadServerHistory();
             txtPrimary.Text   = s.PrimaryHostname;
             txtSecondary.Text = s.SecondaryHostname;
             txtTagnameFilter.Text = s.TagnameFilter;
@@ -861,6 +918,65 @@ namespace HistorianSyncTool.Forms
                 ? s.StartDate : DateTime.Now.AddMonths(-1);
             dtpEnd.Value = s.EndDate > DateTime.MinValue && s.EndDate > s.StartDate
                 ? s.EndDate : DateTime.Now;
+        }
+
+        /// <summary>Maximum remembered server addresses. Long enough for a site with several
+        /// Historians, short enough that the dropdown stays a list and not an archive.</summary>
+        private const int ServerHistoryMax = 10;
+
+        /// <summary>Fills both server dropdowns from the persisted list.</summary>
+        private void LoadServerHistory()
+        {
+            var hosts = ParseServerHistory(Settings.Default.ServerHistory);
+            foreach (var combo in new[] { txtPrimary, txtSecondary })
+            {
+                // Rebuilding Items clears the edit text on some WinForms versions, so the
+                // caller's text is restored afterwards.
+                string keep = combo.Text;
+                combo.Items.Clear();
+                foreach (string h in hosts) combo.Items.Add(h);
+                combo.Text = keep;
+            }
+        }
+
+        private static List<string> ParseServerHistory(string raw)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrWhiteSpace(raw)) return list;
+            foreach (string part in raw.Split(';'))
+            {
+                string h = part.Trim();
+                if (h.Length == 0) continue;
+                if (!list.Any(x => string.Equals(x, h, StringComparison.OrdinalIgnoreCase)))
+                    list.Add(h);
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Records the addresses that are actually CONNECTED right now, most recent first.
+        /// Only a working address is remembered — offering a typo back in the dropdown would
+        /// make it look like a valid choice.
+        /// </summary>
+        private void RememberConnectedServers()
+        {
+            var hosts = ParseServerHistory(Settings.Default.ServerHistory);
+
+            // Mirror first, main second: both are inserted at the front, so the main server
+            // ends up at the top of the list where it belongs.
+            foreach (string h in new[] { _connections.SecondaryHostname, _connections.PrimaryHostname })
+            {
+                if (string.IsNullOrWhiteSpace(h)) continue;
+                string host = h.Trim();
+                hosts.RemoveAll(x => string.Equals(x, host, StringComparison.OrdinalIgnoreCase));
+                hosts.Insert(0, host);
+            }
+
+            if (hosts.Count > ServerHistoryMax) hosts.RemoveRange(ServerHistoryMax, hosts.Count - ServerHistoryMax);
+
+            Settings.Default.ServerHistory = string.Join(";", hosts);
+            Settings.Default.Save();
+            LoadServerHistory();
         }
 
         private void SaveSettings()
@@ -1274,7 +1390,14 @@ namespace HistorianSyncTool.Forms
                 SetConnectionError();
                 SetStatus(Loc.F("msg.connectFailed", ex.Message), true);
             }
-            finally { SetBusy(false); }
+            finally
+            {
+                // Whatever the outcome, remember the addresses that ended up connected —
+                // a half-successful attempt (main up, mirror refused) still taught us a
+                // good address for the main server.
+                RememberConnectedServers();
+                SetBusy(false);
+            }
         }
 
         // ── Browse Tags ────────────────────────────────────────────────────────────
@@ -1450,13 +1573,9 @@ namespace HistorianSyncTool.Forms
         }
 
         // ── Read Data ──────────────────────────────────────────────────────────────
-        private async void btnReadPrimary_Click(object sender, EventArgs e)
-        {
-            if (!_connections.IsPrimaryConnected) { SetStatus(Loc.T("msg.notConnectedMain"), true); return; }
-            if (string.IsNullOrWhiteSpace(_pointPrimary)) { SetStatus(Loc.T("msg.selectPoint"), true); return; }
-            await ReadPrimaryData();
-        }
-
+        // There is no "load data" button any more: opening a point reads both servers
+        // automatically (Phase 12d/U3). Reading is triggered by OpenPoint, by a combo
+        // change, and by the refresh after a restore.
         private async void cboPrimary_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (_suppressAutoRead || _isBusy) return;
@@ -1467,8 +1586,9 @@ namespace HistorianSyncTool.Forms
             string pickedPri = PointName(cboPrimary);
             if (string.IsNullOrWhiteSpace(pickedPri) || pickedPri == _pointPrimary) return;
             _pointPrimary  = pickedPri;
-            _pointOnMain   = true;
-            _pointOnMirror = _onMirror.Count == 0 || _onMirror.Contains(pickedPri);
+            SetPointPresence(pickedPri);
+            _pointOnMain   = true;              // it was picked from the main server's own list
+            _readFailedPrimary = _readFailedSecondary = false;
 
             // Linked mode: auto-select the identical tag on the secondary side too
             bool mirrored = _tagLinkEnabled && !_isLinkPropagating
@@ -1511,20 +1631,14 @@ namespace HistorianSyncTool.Forms
 
                 _rawPrimarySamples = samples;
                 _primaryRows = SamplesToGridRows(samples);
+                _readFailedPrimary = false;
                 UpdateGridRowCount(gridPrimary, _primaryRows.Count);
                 UpdateGridHeaders();
                 SetStatus(Loc.F("msg.readMain", samples.Count.ToString("N0"), tag));
             }
-            catch (OperationCanceledException) { SetStatus(Loc.T("msg.readCancelled")); }
-            catch (Exception ex) { SetStatus(Loc.F("msg.readFailed", ex.Message), true); }
+            catch (OperationCanceledException) { _readFailedPrimary = true; UpdateEmptyMessages(); SetStatus(Loc.T("msg.readCancelled")); }
+            catch (Exception ex) { _readFailedPrimary = true; UpdateEmptyMessages(); SetStatus(Loc.F("msg.readFailed", ex.Message), true); }
             finally { SetBusy(false); }
-        }
-
-        private async void btnReadSecondary_Click(object sender, EventArgs e)
-        {
-            if (!_connections.IsSecondaryConnected) { SetStatus(Loc.T("msg.notConnectedMirror"), true); return; }
-            if (string.IsNullOrWhiteSpace(_pointSecondary)) { SetStatus(Loc.T("msg.selectPoint"), true); return; }
-            await ReadSecondaryData();
         }
 
         private async void cboSecondary_SelectedIndexChanged(object sender, EventArgs e)
@@ -1535,8 +1649,9 @@ namespace HistorianSyncTool.Forms
             string pickedSec = PointName(cboSecondary);
             if (string.IsNullOrWhiteSpace(pickedSec) || pickedSec == _pointSecondary) return;
             _pointSecondary = pickedSec;
-            _pointOnMirror  = true;
-            _pointOnMain    = _onMain.Count == 0 || _onMain.Contains(pickedSec);
+            SetPointPresence(pickedSec);
+            _pointOnMirror  = true;             // it was picked from the mirror's own list
+            _readFailedPrimary = _readFailedSecondary = false;
 
             bool mirrored = _tagLinkEnabled && !_isLinkPropagating
                 && TryMirrorTagSelection(cboSecondary, cboPrimary);
@@ -1656,6 +1771,37 @@ namespace HistorianSyncTool.Forms
             lblGridSecondaryTag.Text = _pointSecondary ?? "";
             lblGridPrimaryTag.Refresh();
             lblGridSecondaryTag.Refresh();
+
+            UpdateEmptyMessages();
+        }
+
+        /// <summary>
+        /// Decides what each EMPTY table says. Four distinct answers, because they mean four
+        /// different things to whoever is looking:
+        ///   • no point open              → "choose a measurement point"
+        ///   • point not on that server   → "not set up on this server" (nothing to restore
+        ///     either — the tool writes readings, it does not create measurement points)
+        ///   • the read failed/cancelled  → say so. An errored read must NEVER read as
+        ///     "no data" — that is the same class of lie the API rules forbid downstream.
+        ///   • otherwise                  → "no readings in this period"
+        /// </summary>
+        private void UpdateEmptyMessages()
+        {
+            _emptyMsgPrimary =
+                string.IsNullOrWhiteSpace(_pointPrimary) ? Loc.T("grid.emptyPrimary")
+              : !_pointOnMain                            ? Loc.T("grid.emptyNotOnServer")
+              : _readFailedPrimary                       ? Loc.T("grid.emptyReadFailed")
+              :                                            Loc.T("grid.emptyNoReadings");
+
+            _emptyMsgSecondary =
+                string.IsNullOrWhiteSpace(_pointSecondary) ? Loc.T("grid.emptySecondary")
+              : !_pointOnMirror                            ? Loc.T("grid.emptyNotOnServer")
+              : _readFailedSecondary                       ? Loc.T("grid.emptyReadFailed")
+              :                                              Loc.T("grid.emptyNoReadings");
+
+            // Only the empty state is drawn by hand, so only repaint when there is one.
+            if (gridPrimary.Rows.Count   == 0) gridPrimary.Invalidate();
+            if (gridSecondary.Rows.Count == 0) gridSecondary.Invalidate();
         }
 
         private async Task ReadSecondaryThenReanalyze()
@@ -1694,12 +1840,13 @@ namespace HistorianSyncTool.Forms
 
                 _rawSecondarySamples = samples;
                 _secondaryRows = SamplesToGridRows(samples);
+                _readFailedSecondary = false;
                 UpdateGridRowCount(gridSecondary, _secondaryRows.Count);
                 UpdateGridHeaders();
                 SetStatus(Loc.F("msg.readMirror", samples.Count.ToString("N0"), tag));
             }
-            catch (OperationCanceledException) { SetStatus(Loc.T("msg.readCancelled")); }
-            catch (Exception ex) { SetStatus(Loc.F("msg.readFailed", ex.Message), true); }
+            catch (OperationCanceledException) { _readFailedSecondary = true; UpdateEmptyMessages(); SetStatus(Loc.T("msg.readCancelled")); }
+            catch (Exception ex) { _readFailedSecondary = true; UpdateEmptyMessages(); SetStatus(Loc.F("msg.readFailed", ex.Message), true); }
             finally { SetBusy(false); }
         }
 
@@ -2698,8 +2845,17 @@ namespace HistorianSyncTool.Forms
         /// </summary>
         private async Task RunGapAnalysis(DateTime from, DateTime to)
         {
-            bool hasPrimary   = _connections.IsPrimaryConnected;
-            bool hasSecondary = _connections.IsSecondaryConnected;
+            // "Connected" is not enough: a server that does not have this point AT ALL must be
+            // treated as un-analysable for it, not as a server that holds nothing. Otherwise
+            // the empty side reads as 0 % coverage and the planner offers to copy the whole
+            // archive into a point that does not exist — undeliverable work, and the opposite
+            // of what the all-points list reports for the very same point (it excludes these
+            // from its totals: this tool writes readings, it does not create measurement
+            // points). On the live rig 201 of 273 points are one-sided, so this is the norm.
+            bool hasPrimary   = _connections.IsPrimaryConnected   && _pointOnMain;
+            bool hasSecondary = _connections.IsSecondaryConnected && _pointOnMirror;
+            bool priNotSetUp  = _connections.IsPrimaryConnected   && !_pointOnMain;
+            bool secNotSetUp  = _connections.IsSecondaryConnected && !_pointOnMirror;
 
             string fallback = Settings.Default.SyncTagName;
             if (string.IsNullOrWhiteSpace(fallback)) fallback = "HistSync";
@@ -2845,6 +3001,8 @@ namespace HistorianSyncTool.Forms
                     }
                     else if (priTag != secTag)
                         stripNote = Loc.T("timeline.strip.differentTags");
+                    else if (priNotSetUp || secNotSetUp)
+                        stripNote = "";     // the track itself already says "not on this server"
                     else
                         stripNote = Loc.T("timeline.strip.connect");
 
@@ -2857,9 +3015,12 @@ namespace HistorianSyncTool.Forms
                 _lastSecondaryResult = secResult;
                 _lastDiffRows        = diffRows ?? new List<DiffSummaryRow>();
 
-                var priTrack = BuildTrack(priResult, ServerNaming.PrimaryLabel, priHost, priFeasKnown, priFill, priUnfill, priBack, priCoverage);
-                var secTrack = BuildTrack(secResult, ServerNaming.SecondaryLabel, secHost, secFeasKnown, secFill, secUnfill, secBack, secCoverage);
-                UpdateGapAnalysisUI(from, to, priTrack, secTrack, copyable, stripNote);
+                var priTrack = BuildTrack(priResult, ServerNaming.PrimaryLabel, priHost, priFeasKnown, priFill, priUnfill, priBack, priCoverage, priNotSetUp);
+                var secTrack = BuildTrack(secResult, ServerNaming.SecondaryLabel, secHost, secFeasKnown, secFill, secUnfill, secBack, secCoverage, secNotSetUp);
+                UpdateGapAnalysisUI(from, to, priTrack, secTrack, copyable, stripNote,
+                    priNotSetUp ? ServerNaming.Display(ServerNaming.PrimaryLabel, priHost)
+                  : secNotSetUp ? ServerNaming.Display(ServerNaming.SecondaryLabel, secHost)
+                  : null);
 
                 // The value curve is drawn from the SAME samples the tables below are showing
                 // (loaded by ReadPrimaryData / ReadSecondaryData), so the graph and the table
@@ -3021,9 +3182,12 @@ namespace HistorianSyncTool.Forms
             await RefreshLoadedGrids();
         }
 
+        /// <param name="notSetUpOn">Display name of a server this point is not configured on,
+        /// or null. It takes over the summary: "in sync" would be a lie (the two servers are
+        /// not comparable) and a readings count would promise work that cannot be delivered.</param>
         private void UpdateGapAnalysisUI(DateTime from, DateTime to,
             TimelineTrackData priTrack, TimelineTrackData secTrack,
-            List<CopyableSegment> copyable, string stripNote)
+            List<CopyableSegment> copyable, string stripNote, string notSetUpOn = null)
         {
             timeline.SetData(from, to, priTrack, secTrack, copyable, stripNote);
             lnkZoomOut.Visible = _zoomStack.Count > 0;
@@ -3033,7 +3197,12 @@ namespace HistorianSyncTool.Forms
             int toSecondary = _lastDiffRows.Where(r =>  r.ToSecondary).Sum(r => r.Count);
             int toPrimary   = _lastDiffRows.Where(r => !r.ToSecondary).Sum(r => r.Count);
             _hasAnalysis = true;
-            if (toSecondary == 0 && toPrimary == 0)
+            if (!string.IsNullOrEmpty(notSetUpOn))
+            {
+                lblGapSummary.Text      = Loc.F("missing.notSetUp", notSetUpOn);
+                lblGapSummary.ForeColor = AppTheme.TextSecondary;
+            }
+            else if (toSecondary == 0 && toPrimary == 0)
             {
                 lblGapSummary.Text      = Loc.T("missing.inSync");
                 lblGapSummary.ForeColor = AppTheme.Success;
@@ -3049,7 +3218,7 @@ namespace HistorianSyncTool.Forms
         /// <summary>Packs one server's analysis into the data the timeline track needs.</summary>
         private TimelineTrackData BuildTrack(GapAnalysisResult result, string sideLabel, string host,
             bool feasibilityKnown, List<TimeRange> fillable, List<TimeRange> unfillable,
-            List<TimeRange> backfilled, double segmentCoverage)
+            List<TimeRange> backfilled, double segmentCoverage, bool notSetUp = false)
         {
             // sideLabel is the INTERNAL role ("Primary"/"Secondary"); everything the user
             // sees goes through ServerNaming.
@@ -3057,12 +3226,17 @@ namespace HistorianSyncTool.Forms
 
             if (result == null)
             {
+                // "Not set up here" and "no readings here" look identical if both render as an
+                // empty track, but only one of them is repairable. Say which it is.
+                string why =
+                    notSetUp ? Loc.T(sideLabel == ServerNaming.PrimaryLabel ? "ov.notOnMain" : "ov.notOnMirror")
+                  : Loc.T(string.IsNullOrWhiteSpace(host) ? "timeline.notConnected" : "timeline.notAnalyzed");
+
                 return new TimelineTrackData
                 {
                     Label = who,
                     CoverageRatio = -1,
-                    EmptyText = Loc.T(string.IsNullOrWhiteSpace(host)
-                        ? "timeline.notConnected" : "timeline.notAnalyzed")
+                    EmptyText = why
                 };
             }
 

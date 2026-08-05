@@ -31,7 +31,76 @@ namespace HistorianSyncTool.UI.Controls
             Font    = AppTheme.SectionLabel;
             Cursor  = Cursors.Hand;
             UseVisualStyleBackColor = false;
+            AutoEllipsis = true;      // last resort: never clip a caption mid-word in silence
             ApplyStyle();
+        }
+
+        // ── Captions must never be silently cut ────────────────────────────────────
+        // A plain Button clips overflowing text with no sign that anything is missing, so
+        // "← Copy to main server" reads as "← Copy to main" and the German equivalents lose
+        // whole words. That already cost us a review round on the table captions. Here the
+        // font shrinks a little to make the caption fit; only if that is not enough does
+        // AutoEllipsis kick in, which at least SHOWS that something was dropped.
+
+        private const float MinFontSize = 7.25f;
+        private Font _designFont;      // the size the caption would like to be
+        private Font _fitFont;         // the shrunk copy in use, ours to dispose
+        private bool _fitting;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _fitFont != null) { _fitFont.Dispose(); _fitFont = null; }
+            base.Dispose(disposing);
+        }
+
+        protected override void OnTextChanged(System.EventArgs e) { base.OnTextChanged(e); FitCaption(); }
+        protected override void OnSizeChanged(System.EventArgs e) { base.OnSizeChanged(e); FitCaption(); }
+
+        protected override void OnFontChanged(System.EventArgs e)
+        {
+            base.OnFontChanged(e);
+            if (_fitting) return;      // our own shrink, not a new design font
+            _designFont = Font;
+            FitCaption();
+        }
+
+        private void FitCaption()
+        {
+            if (_fitting || Width <= 8 || string.IsNullOrEmpty(Text)) return;
+            if (_designFont == null) _designFont = Font;
+
+            // "&&" is how a literal ampersand is escaped in a button caption; measure what
+            // is actually painted, not the escape.
+            string shown = Text.Replace("&&", "&");
+            int avail = Width - 10;
+
+            // Find the size that fits without allocating one Font per step.
+            float size = _designFont.Size;
+            using (var probe = new Font(_designFont.FontFamily, size, _designFont.Style))
+            {
+                var f = probe;
+                while (TextRenderer.MeasureText(shown, f).Width > avail && size > MinFontSize)
+                {
+                    size -= 0.5f;
+                    if (!ReferenceEquals(f, probe)) f.Dispose();
+                    f = new Font(_designFont.FontFamily, size, _designFont.Style);
+                }
+                if (!ReferenceEquals(f, probe)) f.Dispose();
+            }
+
+            _fitting = true;
+            try
+            {
+                var old = _fitFont;
+                if (size >= _designFont.Size) { _fitFont = null; Font = _designFont; }
+                else
+                {
+                    _fitFont = new Font(_designFont.FontFamily, size, _designFont.Style);
+                    Font = _fitFont;
+                }
+                if (old != null) old.Dispose();
+            }
+            finally { _fitting = false; }
         }
 
         private void ApplyStyle()

@@ -41,10 +41,10 @@ namespace HistorianSyncTool.Forms
         // Left — Connection
         private SectionHeader  hdrConnection;
         private Label          lblPrimary;
-        private TextBox        txtPrimary;
+        private ComboBox       txtPrimary;
         private Label          lblPrimaryStatus;
         private Label          lblSecondary;
-        private TextBox        txtSecondary;
+        private ComboBox       txtSecondary;
         private Label          lblSecondaryStatus;
         private FlatButton     btnConnect;
 
@@ -98,12 +98,13 @@ namespace HistorianSyncTool.Forms
         // Center card 2 — one measurement point in detail
         private Panel          pnlDetail;
         private Panel          pnlDetailHeader;
-        private LinkLabel      lnkBackToOverview;
+        private FlatButton     lnkBackToOverview;
         private Label          lblDetailPoint;
 
         // Center — measured values of the open point, both servers overlaid
         private Panel          pnlChart;
         private SectionHeader  hdrChart;
+        private LinkLabel      lnkEnlarge;
         private ValueChart     chart;
 
         // Center — sync timeline (both servers on one shared time axis)
@@ -123,8 +124,6 @@ namespace HistorianSyncTool.Forms
         private System.Windows.Forms.DataGridView gridPrimary;
         private System.Windows.Forms.DataGridView gridSecondary;
         private Panel          pnlGridActions;
-        private FlatButton     btnReadPrimary;
-        private FlatButton     btnReadSecondary;
         private Label          lblGridPrimaryTag;
         private Label          lblGridSecondaryTag;
         private FlatButton     btnCompare;
@@ -323,7 +322,7 @@ namespace HistorianSyncTool.Forms
             var pnlConnContent = new Panel { Left = 0, Top = hdrConnection.Bottom, Width = fw };
 
             lblPrimary = MakeLabel("", lw, pad, 8);
-            txtPrimary = MakeTextBox(lw, pad, lblPrimary.Bottom + 2);
+            txtPrimary = MakeHostCombo(lw, pad, lblPrimary.Bottom + 2);
             lblPrimaryStatus = new Label
             {
                 Text = "Not connected",
@@ -333,7 +332,7 @@ namespace HistorianSyncTool.Forms
             };
 
             lblSecondary = MakeLabel("", lw, pad, lblPrimaryStatus.Bottom + 6);
-            txtSecondary = MakeTextBox(lw, pad, lblSecondary.Bottom + 2);
+            txtSecondary = MakeHostCombo(lw, pad, lblSecondary.Bottom + 2);
             lblSecondaryStatus = new Label
             {
                 Text = "Not connected",
@@ -613,35 +612,31 @@ namespace HistorianSyncTool.Forms
             pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  50f));
             pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 156)); // action column
             pnlGrids.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  50f));
-            pnlGrids.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));       // button + label row
+            pnlGrids.RowStyles.Add(new RowStyle(SizeType.Absolute, 26f));       // point-name caption row
             pnlGrids.RowStyles.Add(new RowStyle(SizeType.Percent,  100f));      // grid row
 
             // Row 0 — Read buttons + tag labels, each directly above its grid
+            // No "Load data" buttons: opening a point loads both servers automatically, so a
+            // manual load button could only ever repeat what already happened.
             var pnlReadLeft = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(0, 2, 4, 0) };
-            btnReadPrimary = new FlatButton { Text = "", Dock = DockStyle.Top, Height = 30 };
-            btnReadPrimary.Click += btnReadPrimary_Click;
             lblGridPrimaryTag = new Label
             {
-                Text = "", Dock = DockStyle.Bottom, Height = 22,
-                Font = AppTheme.Bold, ForeColor = AppTheme.Navy,
+                Text = "", Dock = DockStyle.Fill, Height = 22,
+                Font = AppTheme.Default, ForeColor = AppTheme.Navy,
                 TextAlign = ContentAlignment.MiddleCenter,
                 AutoEllipsis = true   // long point names must degrade visibly, not vanish
             };
             pnlReadLeft.Controls.Add(lblGridPrimaryTag);
-            pnlReadLeft.Controls.Add(btnReadPrimary);
 
             var pnlReadRight = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Background, Padding = new Padding(4, 2, 0, 0) };
-            btnReadSecondary = new FlatButton { Text = "", Dock = DockStyle.Top, Height = 30 };
-            btnReadSecondary.Click += btnReadSecondary_Click;
             lblGridSecondaryTag = new Label
             {
-                Text = "", Dock = DockStyle.Bottom, Height = 22,
-                Font = AppTheme.Bold, ForeColor = AppTheme.Navy,
+                Text = "", Dock = DockStyle.Fill, Height = 22,
+                Font = AppTheme.Default, ForeColor = AppTheme.Navy,
                 TextAlign = ContentAlignment.MiddleCenter,
                 AutoEllipsis = true
             };
             pnlReadRight.Controls.Add(lblGridSecondaryTag);
-            pnlReadRight.Controls.Add(btnReadSecondary);
 
             // Row 1 — Data grids with empty-state placeholder text
             gridPrimary   = new System.Windows.Forms.DataGridView { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 3, 0) };
@@ -652,7 +647,7 @@ namespace HistorianSyncTool.Forms
                 var dg = (System.Windows.Forms.DataGridView)s;
                 if (dg.Rows.Count > 0) return;
                 System.Windows.Forms.TextRenderer.DrawText(e.Graphics,
-                    Loc.T("grid.emptyPrimary"),
+                    _emptyMsgPrimary,
                     AppTheme.Default,
                     new Rectangle(0, dg.ColumnHeadersHeight, dg.Width, dg.Height - dg.ColumnHeadersHeight),
                     AppTheme.TextSecondary,
@@ -666,7 +661,7 @@ namespace HistorianSyncTool.Forms
                 var dg = (System.Windows.Forms.DataGridView)s;
                 if (dg.Rows.Count > 0) return;
                 System.Windows.Forms.TextRenderer.DrawText(e.Graphics,
-                    Loc.T("grid.emptySecondary"),
+                    _emptyMsgSecondary,
                     AppTheme.Default,
                     new Rectangle(0, dg.ColumnHeadersHeight, dg.Width, dg.Height - dg.ColumnHeadersHeight),
                     AppTheme.TextSecondary,
@@ -748,7 +743,7 @@ namespace HistorianSyncTool.Forms
             pnlTimeline = new Panel
             {
                 Dock      = DockStyle.Top,
-                Height    = 236,
+                Height    = 200,
                 BackColor = AppTheme.Surface,
                 Padding   = new Padding(0, 0, 0, 4)
             };
@@ -794,19 +789,17 @@ namespace HistorianSyncTool.Forms
             // ══════════════════════════════════════════════════════════════════════
             pnlDetailHeader = new Panel
             {
-                Dock = DockStyle.Top, Height = 28, BackColor = AppTheme.Background,
-                Padding = new Padding(4, 2, 4, 2)
+                Dock = DockStyle.Top, Height = 34, BackColor = AppTheme.Background,
+                Padding = new Padding(4, 3, 4, 3)
             };
-            lnkBackToOverview = new LinkLabel
+            // A faint link was easy to miss; this is the way back out of the point view.
+            lnkBackToOverview = new FlatButton
             {
-                Dock            = DockStyle.Left,
-                Width           = 190,
-                Font            = AppTheme.Bold,
-                LinkColor       = AppTheme.Navy,
-                ActiveLinkColor = AppTheme.Teal,
-                LinkBehavior    = LinkBehavior.HoverUnderline,
-                TextAlign       = ContentAlignment.MiddleLeft,
-                Cursor          = Cursors.Hand
+                Dock        = DockStyle.Left,
+                Width       = 230,
+                ButtonStyle = FlatButtonStyle.Secondary,
+                Font        = AppTheme.Bold,
+                Cursor      = Cursors.Hand
             };
             lnkBackToOverview.Click += lnkBackToOverview_Click;
             lblDetailPoint = new Label
@@ -821,10 +814,27 @@ namespace HistorianSyncTool.Forms
             // and above the tables — same time axis, same samples as the tables.
             pnlChart = new Panel
             {
-                Dock = DockStyle.Top, Height = 168, BackColor = AppTheme.Surface,
+                // Two stacked plots need more height than one; the timeline gives some back.
+                Dock = DockStyle.Top, Height = 214, BackColor = AppTheme.Surface,
                 Padding = new Padding(10, 4, 10, 6)
             };
             hdrChart = new SectionHeader { Text = "", Dock = DockStyle.Top };
+            lnkEnlarge = new LinkLabel
+            {
+                Text            = "",
+                Dock            = DockStyle.Right,
+                Width           = 150,
+                LinkColor       = Color.White,
+                ActiveLinkColor = AppTheme.Teal,
+                LinkBehavior    = LinkBehavior.HoverUnderline,
+                TextAlign       = ContentAlignment.MiddleRight,
+                Padding         = new Padding(0, 0, 12, 0),
+                Font            = AppTheme.SectionLabel,
+                BackColor       = AppTheme.Navy,
+                Cursor          = Cursors.Hand
+            };
+            lnkEnlarge.Click += lnkEnlarge_Click;
+            hdrChart.Controls.Add(lnkEnlarge);
             chart = new ValueChart { Dock = DockStyle.Fill };
             var pnlChartWrap = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Surface };
             pnlChartWrap.Controls.Add(chart);
@@ -949,10 +959,9 @@ namespace HistorianSyncTool.Forms
             pnlLog.Title         = Loc.T("hdr.log");
             btnClearLog.Text     = Loc.T("btn.clearLog");
             btnCopyLog.Text      = Loc.T("btn.copyLog");
-            btnReadPrimary.Text  = Loc.T("btn.readPrimary");
-            btnReadSecondary.Text= Loc.T("btn.readSecondary");
 
             hdrChart.Text             = Loc.T("hdr.values");
+            lnkEnlarge.Text           = Loc.T("chart.enlarge");
             chart.SetEmptyMessage(Loc.T("chart.empty"));
 
             hdrOverview.Text          = Loc.T("hdr.overview");
@@ -1085,6 +1094,21 @@ namespace HistorianSyncTool.Forms
         {
             Left = left, Top = top, Width = width, Height = AppTheme.ControlHeight,
             Font = AppTheme.Default, BorderStyle = BorderStyle.FixedSingle
+        };
+
+        /// <summary>
+        /// Server address field: free text, but remembering what has been typed before so a
+        /// site with a handful of Historians can pick instead of retype. The list is persisted
+        /// (Settings.ServerHistory) and grows on every successful connect.
+        /// </summary>
+        private static ComboBox MakeHostCombo(int width, int left, int top) => new ComboBox
+        {
+            Left = left, Top = top, Width = width, Height = AppTheme.ControlHeight,
+            Font = AppTheme.Default,
+            DropDownStyle      = ComboBoxStyle.DropDown,
+            AutoCompleteMode   = AutoCompleteMode.SuggestAppend,
+            AutoCompleteSource = AutoCompleteSource.ListItems,
+            FlatStyle          = FlatStyle.Flat
         };
 
         private static DateTimePicker MakeDtp(int width, int left, int top) => new DateTimePicker

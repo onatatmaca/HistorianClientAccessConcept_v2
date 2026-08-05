@@ -8,23 +8,21 @@ using System.Windows.Forms;
 namespace HistorianSyncTool.UI.Controls
 {
     /// <summary>
-    /// The measured values of one point from BOTH servers on one axis, with the periods each
-    /// server is missing shaded behind the curves:
+    /// The measured values of one point, one plot per server, stacked on a shared time axis —
+    /// deliberately the same shape as the completeness bars above it:
     ///
-    ///   °C
-    ///   25 ┤        ╱╲        ╱╲     ── main server (solid)
-    ///      │   ╱╲╱╲╱  ╲╱╲╱╲╱   ╲     ── mirror (dashed)
-    ///   20 ┤╱╲╱      ░░░░░       ╲    ░░ missing on the mirror
-    ///      └──────────────────────────
-    ///       01.07                14.07
+    ///   main    ┤   ╱╲╱╲╱╲    ░░░░   ╱╲╱╲        ░░ = missing on this server
+    ///   mirror  ┤   ╱╲╱╲╱╲           ╱╲╱╲
+    ///           └─────────────────────────────
     ///
-    /// Answers the question the coverage timeline cannot: do the two servers actually agree on
-    /// the values, and what was the process doing where one of them lost data?
+    /// One plot each rather than two curves in one box: on a healthy pair the curves sit on top
+    /// of each other, so overlaying them hides exactly the thing the screen exists to show.
+    /// The value scale is SHARED between the two plots, so a difference in level is visible at
+    /// a glance instead of being hidden by independent auto-scaling.
     ///
-    /// Drawn from the SAME samples the tables below are showing, decimated to a min/max envelope
-    /// per pixel column — so the curve and the table can never disagree, and a window holding
-    /// millions of readings still paints in one pass. Custom-drawn to match GapTimeline rather
-    /// than pulling in the charting assembly for one control.
+    /// Drawn from the SAME samples the tables below show, decimated to a min/max envelope per
+    /// pixel column, so the curve and the table can never disagree and a window holding
+    /// millions of readings still paints in one pass.
     /// </summary>
     public class ValueChart : Control
     {
@@ -42,6 +40,9 @@ namespace HistorianSyncTool.UI.Controls
 
         private static readonly Color MainColor   = Color.FromArgb(30, 58, 95);     // navy
         private static readonly Color MirrorColor = Color.FromArgb(22, 160, 133);   // teal
+
+        /// <summary>Larger fonts and taller rows for the enlarged window.</summary>
+        public bool Large { get; set; }
 
         public ValueChart()
         {
@@ -70,6 +71,15 @@ namespace HistorianSyncTool.UI.Controls
             Invalidate();
         }
 
+        /// <summary>Everything needed to clone this chart into the enlarged window.</summary>
+        public void CopyTo(ValueChart other)
+        {
+            if (other == null) return;
+            other.SetEmptyMessage(_emptyMessage);
+            other.SetData(_from, _to, _main, _mirror, _mainMissing, _mirrorMissing,
+                          _mainLabel, _mirrorLabel);
+        }
+
         public void Clear()
         {
             _main = null; _mirror = null;
@@ -80,26 +90,36 @@ namespace HistorianSyncTool.UI.Controls
         }
 
         // ── Layout ─────────────────────────────────────────────────────────────────
+        // No left gutter: the completeness timeline above spans the full control width and the
+        // two are only comparable if the same x means the same instant. Value labels are drawn
+        // INSIDE each plot.
 
-        // No left gutter: the completeness timeline directly above spans the full control
-        // width, and the two are only comparable if the same x means the same instant in both.
-        // The value labels are therefore drawn INSIDE the plot.
-        private const int LeftAxis = 0;
-        private const int TopPad   = 16;
-        private const int BottomAxis = 16;
+        private int LabelH => Large ? 18 : 14;
+        private int AxisH  => Large ? 26 : 15;   // Large also has to fit the date labels
+        private int GapH   => 4;
 
-        private Rectangle PlotRect =>
-            new Rectangle(LeftAxis, TopPad,
-                          Math.Max(10, Width - LeftAxis - 8),
-                          Math.Max(10, Height - TopPad - BottomAxis));
+        private void LayoutPlots(out Rectangle top, out Rectangle bottom, out Rectangle axis)
+        {
+            int w = Math.Max(10, Width - 8);
+            int usable = Height - AxisH - 2 * LabelH - GapH;
+            int plotH = Math.Max(18, usable / 2);
+            int y = 0;
+            y += LabelH;
+            top = new Rectangle(0, y, w, plotH);
+            y += plotH + GapH;
+            y += LabelH;
+            bottom = new Rectangle(0, y, w, plotH);
+            y += plotH;
+            axis = new Rectangle(0, y, w, AxisH);
+        }
 
-        private int XOf(DateTime t)
+        private int XOf(DateTime t, Rectangle plot)
         {
             long total = (_to - _from).Ticks;
-            if (total <= 0) return PlotRect.Left;
+            if (total <= 0) return plot.Left;
             double f = (double)(t - _from).Ticks / total;
             if (f < 0) f = 0; if (f > 1) f = 1;
-            return PlotRect.Left + (int)Math.Round(f * (PlotRect.Width - 1));
+            return plot.Left + (int)Math.Round(f * (plot.Width - 1));
         }
 
         // ── Painting ───────────────────────────────────────────────────────────────
@@ -107,7 +127,6 @@ namespace HistorianSyncTool.UI.Controls
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            var plot = PlotRect;
 
             bool empty = !_hasRange
                 || ((_main == null || _main.Count == 0) && (_mirror == null || _mirror.Count == 0));
@@ -121,25 +140,46 @@ namespace HistorianSyncTool.UI.Controls
                 return;
             }
 
+            Rectangle top, bottom, axis;
+            LayoutPlots(out top, out bottom, out axis);
+
             float min, max;
-            ComputeRange(out min, out max);
+            ComputeRange(out min, out max);   // shared scale: level differences stay visible
 
-            // Missing periods behind everything, one tint per server.
-            ShadeMissing(g, _mainMissing,   Color.FromArgb(70, AppTheme.Danger), plot, true);
-            ShadeMissing(g, _mirrorMissing, Color.FromArgb(70, AppTheme.Danger), plot, false);
+            DrawPlot(g, top,    _main,   _mainMissing,   MainColor,   _mainLabel,   min, max, false);
+            DrawPlot(g, bottom, _mirror, _mirrorMissing, MirrorColor, _mirrorLabel, min, max, true);
 
-            DrawYAxis(g, plot, min, max);
+            // On the main screen the completeness timeline sits directly above on the SAME
+            // time span and carries the dates — a second axis here would just repeat it. The
+            // enlarged window has no timeline, so without this it shows curves against no
+            // time reference at all.
+            if (Large) DrawTimeAxis(g, axis);
+
+            DrawCursor(g, top, bottom, axis, min, max);
+        }
+
+        private void DrawPlot(Graphics g, Rectangle plot,
+            List<(DateTime Time, float Value, double Quality)> data, List<TimeRange> missing,
+            Color color, string label, float min, float max, bool dashed)
+        {
+            var labelFont = Large ? AppTheme.Default : AppTheme.Small;
+
+            using (var br = new SolidBrush(color))
+                g.DrawString(label, labelFont, br, plot.Left + 2, plot.Top - LabelH);
+
+            // Missing periods behind the curve, across the full height of THIS server's plot.
+            using (var br = new SolidBrush(Color.FromArgb(60, AppTheme.Danger)))
+                foreach (var r in missing ?? new List<TimeRange>())
+                {
+                    int x1 = XOf(r.Start, plot), x2 = XOf(r.End, plot);
+                    g.FillRectangle(br, x1, plot.Top, Math.Max(2, x2 - x1), plot.Height);
+                }
+
+            DrawGrid(g, plot, min, max, labelFont);
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            // Main first, mirror dashed ON TOP: on a healthy pair the two curves are almost
-            // identical, and whichever is drawn second is the only one you can see. Dashes over
-            // a solid line show both.
-            DrawSeries(g, _main,   MainColor,   plot, min, max, false);
-            DrawSeries(g, _mirror, MirrorColor, plot, min, max, true);
+            DrawSeries(g, data, color, plot, min, max, dashed);
             g.SmoothingMode = SmoothingMode.None;
-
-            DrawLegend(g, plot);
-            DrawCursor(g, plot, min, max);
 
             using (var pen = new Pen(AppTheme.Border))
                 g.DrawRectangle(pen, plot.Left, plot.Top, plot.Width - 1, plot.Height - 1);
@@ -158,29 +198,53 @@ namespace HistorianSyncTool.UI.Controls
                 }
             }
             if (min > max) { min = 0; max = 1; }
-            if (Math.Abs(max - min) < 1e-6f) { min -= 1; max += 1; }   // flat line still needs a band
+            if (Math.Abs(max - min) < 1e-6f) { min -= 1; max += 1; }   // a flat line still needs a band
             float pad = (max - min) * 0.08f;
             min -= pad; max += pad;
         }
 
-        private void ShadeMissing(Graphics g, List<TimeRange> ranges, Color color, Rectangle plot, bool topHalf)
+        /// <summary>
+        /// Date/time labels under the lower plot. The format follows the span, so a two-hour
+        /// window does not print the same date six times and a two-year window does not print
+        /// six identical times.
+        /// </summary>
+        private void DrawTimeAxis(Graphics g, Rectangle axis)
         {
-            if (ranges == null || ranges.Count == 0) return;
-            int h = plot.Height / 2;
-            int y = topHalf ? plot.Top : plot.Top + h;
-            using (var br = new SolidBrush(color))
-                foreach (var r in ranges)
+            TimeSpan span = _to - _from;
+            if (span <= TimeSpan.Zero) return;
+
+            string fmt = span.TotalDays   > 200 ? "MMM yyyy"
+                       : span.TotalDays   > 3   ? "dd.MM"
+                       : span.TotalHours  > 6   ? "dd.MM HH:mm"
+                       :                          "HH:mm";
+
+            int ticks = Math.Max(2, Math.Min(8, axis.Width / 130));
+            using (var br  = new SolidBrush(AppTheme.TextSecondary))
+            using (var pen = new Pen(Color.FromArgb(40, 0, 0, 0)))
+            {
+                for (int i = 0; i <= ticks; i++)
                 {
-                    int x1 = XOf(r.Start), x2 = XOf(r.End);
-                    int w = Math.Max(2, x2 - x1);
-                    g.FillRectangle(br, x1, y, w, h);
+                    DateTime t = _from + TimeSpan.FromTicks(span.Ticks * i / ticks);
+                    int x = axis.Left + (int)Math.Round((double)i / ticks * (axis.Width - 1));
+                    g.DrawLine(pen, x, axis.Top, x, axis.Top + 3);
+
+                    string s = t.ToString(fmt);
+                    float tw = g.MeasureString(s, AppTheme.Small).Width;
+                    // First and last labels are pulled inside so they cannot be clipped.
+                    float tx = i == 0 ? axis.Left
+                             : i == ticks ? axis.Right - tw
+                             : x - tw / 2;
+                    g.DrawString(s, AppTheme.Small, br, tx, axis.Top + 4);
                 }
+            }
         }
 
-        private void DrawYAxis(Graphics g, Rectangle plot, float min, float max)
+        /// <summary>Horizontal grid with the value at each line, drawn inside the plot on a
+        /// small opaque backing so the numbers stay readable over the curve.</summary>
+        private void DrawGrid(Graphics g, Rectangle plot, float min, float max, Font font)
         {
-            const int steps = 4;
-            using (var grid = new Pen(Color.FromArgb(30, 0, 0, 0)))
+            int steps = Large ? 4 : 2;   // the small chart has room for very few
+            using (var grid = new Pen(Color.FromArgb(28, 0, 0, 0)))
             using (var br = new SolidBrush(AppTheme.TextSecondary))
             {
                 for (int i = 0; i <= steps; i++)
@@ -188,21 +252,22 @@ namespace HistorianSyncTool.UI.Controls
                     float v = min + (max - min) * i / steps;
                     int y = plot.Bottom - 1 - (int)((v - min) / (max - min) * (plot.Height - 2));
                     g.DrawLine(grid, plot.Left, y, plot.Right, y);
-                    if (i == 0) continue;   // the bottom label would sit on the frame
+                    if (i == 0 || i == steps) continue;   // top/bottom sit on the frame
+
                     string label = Math.Abs(v) >= 1000 ? v.ToString("N0") : v.ToString("G4");
-                    SizeF sz = g.MeasureString(label, AppTheme.Small);
-                    var box = new RectangleF(plot.Left + 3, y - sz.Height / 2, sz.Width + 2, sz.Height);
-                    using (var bg = new SolidBrush(Color.FromArgb(205, Color.White)))
-                        g.FillRectangle(bg, box);   // keep labels readable over the curve
-                    g.DrawString(label, AppTheme.Small, br, box.X + 1, box.Y);
+                    SizeF sz = g.MeasureString(label, font);
+                    var box = new RectangleF(plot.Left + 3, y - sz.Height / 2, sz.Width + 3, sz.Height);
+                    using (var bg = new SolidBrush(Color.FromArgb(215, Color.White)))
+                        g.FillRectangle(bg, box);
+                    g.DrawString(label, font, br, box.X + 1, box.Y);
                 }
             }
         }
 
         /// <summary>
         /// One server's curve, decimated to a min/max envelope per pixel column: a column with
-        /// several readings is drawn as the vertical span it covers, so spikes survive the
-        /// decimation instead of being sampled away.
+        /// several readings is drawn as the vertical span it covers, so spikes survive instead
+        /// of being sampled away.
         /// </summary>
         private void DrawSeries(Graphics g, List<(DateTime Time, float Value, double Quality)> data,
             Color color, Rectangle plot, float min, float max, bool dashed)
@@ -225,71 +290,55 @@ namespace HistorianSyncTool.UI.Controls
                 else { if (y < loY[col]) loY[col] = y; if (y > hiY[col]) hiY[col] = y; }
             }
 
-            using (var pen = new Pen(color, 1.4f))
+            using (var pen = new Pen(color, Large ? 1.6f : 1.3f))
             {
                 if (dashed) { pen.DashStyle = DashStyle.Dash; pen.DashPattern = new float[] { 4f, 3f }; }
-
                 int prevCol = -1, prevY = 0;
                 for (int c = 0; c < w; c++)
                 {
                     if (!has[c]) continue;
                     int x = plot.Left + c;
-                    if (hiY[c] != loY[c]) g.DrawLine(pen, x, loY[c], x, hiY[c]);   // the column's span
-                    // Join to the previous column only across a small gap: bridging a real
-                    // outage would draw a line through data that does not exist.
+                    if (hiY[c] != loY[c]) g.DrawLine(pen, x, loY[c], x, hiY[c]);
+                    // Join only across a small gap: bridging a real outage would draw a line
+                    // through data that does not exist.
                     if (prevCol >= 0 && c - prevCol <= 3) g.DrawLine(pen, plot.Left + prevCol, prevY, x, loY[c]);
                     prevCol = c; prevY = hiY[c];
                 }
             }
         }
 
-        private void DrawLegend(Graphics g, Rectangle plot)
+        private void DrawCursor(Graphics g, Rectangle top, Rectangle bottom, Rectangle axis,
+            float min, float max)
         {
-            int x = plot.Left + 60, y = plot.Top + 2;
-            using (var br = new SolidBrush(MainColor))
-            using (var pen = new Pen(MainColor, 2f))
-            {
-                g.DrawLine(pen, x, y + 6, x + 16, y + 6);
-                g.DrawString(_mainLabel, AppTheme.Small, br, x + 20, y);
-                x += 24 + (int)g.MeasureString(_mainLabel, AppTheme.Small).Width + 14;
-            }
-            using (var br = new SolidBrush(MirrorColor))
-            using (var pen = new Pen(MirrorColor, 2f) { DashStyle = DashStyle.Dash })
-            {
-                g.DrawLine(pen, x, y + 6, x + 16, y + 6);
-                g.DrawString(_mirrorLabel, AppTheme.Small, br, x + 20, y);
-            }
-        }
-
-        private void DrawCursor(Graphics g, Rectangle plot, float min, float max)
-        {
-            if (_mouseX < plot.Left || _mouseX > plot.Right) return;
+            if (_mouseX < top.Left || _mouseX > top.Right) return;
 
             using (var pen = new Pen(Color.FromArgb(110, AppTheme.Navy)))
-                g.DrawLine(pen, _mouseX, plot.Top, _mouseX, plot.Bottom);
+                g.DrawLine(pen, _mouseX, top.Top, _mouseX, bottom.Bottom);
 
             DateTime at = _from + TimeSpan.FromTicks(
-                (long)((double)(_mouseX - plot.Left) / Math.Max(1, plot.Width - 1) * (_to - _from).Ticks));
+                (long)((double)(_mouseX - top.Left) / Math.Max(1, top.Width - 1) * (_to - _from).Ticks));
 
+            string vMain   = ValueAt(_main, at, top);
+            string vMirror = ValueAt(_mirror, at, top);
             string txt = at.ToString("dd.MM HH:mm");
-            string vMain   = ValueAt(_main, at);
-            string vMirror = ValueAt(_mirror, at);
-            if (vMain != null)   txt += "   " + _mainLabel + " " + vMain;
-            if (vMirror != null) txt += "   " + _mirrorLabel + " " + vMirror;
+            txt += "   " + _mainLabel   + " " + (vMain   ?? "—");
+            txt += "   " + _mirrorLabel + " " + (vMirror ?? "—");
 
-            SizeF sz = g.MeasureString(txt, AppTheme.Small);
-            float tx = Math.Min(Math.Max(plot.Left, _mouseX - sz.Width / 2f), plot.Right - sz.Width);
+            var font = Large ? AppTheme.Default : AppTheme.Small;
+            SizeF sz = g.MeasureString(txt, font);
+            float tx = Math.Min(Math.Max(top.Left, _mouseX - sz.Width / 2f), top.Right - sz.Width);
             using (var bg = new SolidBrush(AppTheme.Navy))
             using (var fg = new SolidBrush(Color.White))
             {
-                g.FillRectangle(bg, tx - 3, plot.Bottom + 1, sz.Width + 6, sz.Height);
-                g.DrawString(txt, AppTheme.Small, fg, tx, plot.Bottom + 1);
+                g.FillRectangle(bg, tx - 3, axis.Top, sz.Width + 6, sz.Height);
+                g.DrawString(txt, font, fg, tx, axis.Top);
             }
         }
 
         /// <summary>Nearest reading to <paramref name="at"/>, or null when that server has
         /// nothing close — the readout must not invent a value inside an outage.</summary>
-        private string ValueAt(List<(DateTime Time, float Value, double Quality)> data, DateTime at)
+        private string ValueAt(List<(DateTime Time, float Value, double Quality)> data, DateTime at,
+            Rectangle plot)
         {
             if (data == null || data.Count == 0) return null;
 
@@ -303,9 +352,8 @@ namespace HistorianSyncTool.UI.Controls
             if (lo > 0 && Math.Abs((data[lo - 1].Time - at).Ticks) < Math.Abs((best.Time - at).Ticks))
                 best = data[lo - 1];
 
-            // "Close" scales with the window: one pixel column's worth of time.
             long tolerance = Math.Max(TimeSpan.TicksPerSecond,
-                (_to - _from).Ticks / Math.Max(1, PlotRect.Width) * 3);
+                (_to - _from).Ticks / Math.Max(1, plot.Width) * 3);
             if (Math.Abs((best.Time - at).Ticks) > tolerance) return null;
             return best.Value.ToString("G6");
         }

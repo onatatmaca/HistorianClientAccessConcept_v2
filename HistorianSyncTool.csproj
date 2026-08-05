@@ -64,6 +64,7 @@
     </Compile>
     <Compile Include="Forms\BackfillHistoryDialog.cs" />
     <Compile Include="Forms\BidirectionalBackfillDialog.cs" />
+    <Compile Include="Forms\ChartDialog.cs" />
     <Compile Include="Forms\ProgressDialog.cs" />
     <Compile Include="Forms\SchedulerSettingsDialog.cs" />
     <Compile Include="Forms\SyncReportDialog.cs" />

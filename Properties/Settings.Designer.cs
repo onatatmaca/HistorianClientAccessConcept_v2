@@ -33,6 +33,20 @@ namespace HistorianSyncTool.Properties
             set { this["SecondaryHostname"] = value; }
         }
 
+        /// <summary>
+        /// Server addresses that have connected successfully before, semicolon-separated,
+        /// most recent first. Offered in both server dropdowns so a site with a handful of
+        /// Historians picks instead of retyping.
+        /// </summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string ServerHistory
+        {
+            get { return (string)this["ServerHistory"]; }
+            set { this["ServerHistory"] = value; }
+        }
+
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("*")]

@@ -170,6 +170,11 @@ namespace HistorianSyncTool.UI
                                               "{0} Messwert(e) fehlen auf dem Spiegelserver\nund {1} auf dem Hauptserver." } },
             { "missing.summaryEst",   new[] { "About {0} reading(s) missing on the mirror\nand {1} on the main server (estimate, at least).",
                                               "Etwa {0} Messwert(e) fehlen auf dem Spiegelserver\nund {1} auf dem Hauptserver (Schätzung, mindestens)." } },
+            // A point that is not SET UP on a server cannot be repaired by copying readings
+            // into it. The all-points list already says this and leaves such points out of
+            // its totals; this screen has to give the same answer for the same point.
+            { "missing.notSetUp",     new[] { "This measurement point is not set up on {0}.\nReadings cannot be restored into a point that does not exist — it has to be created there first.",
+                                              "Diese Messstelle ist auf {0} nicht angelegt.\nIn eine nicht vorhandene Messstelle können keine Messwerte zurückgeschrieben werden — sie muss dort zuerst angelegt werden." } },
             { "missing.inSyncAll",    new[] { "No differences found at segment level —\nopen a point for an exact check.",
                                               "Auf Segmentebene keine Abweichungen —\nfür eine genaue Prüfung eine Messstelle öffnen." } },
             { "missing.clickHint",    new[] { "Click a row to zoom the timeline to it.",
@@ -211,7 +216,9 @@ namespace HistorianSyncTool.UI
                                               "Zeigt genau, was in beide Richtungen kopiert würde, und fragt vor dem Schreiben nach." } },
             { "btn.copyToPrimary",    new[] { "← Copy to main server",                   "← Auf Hauptserver kopieren" } },
             { "btn.copyToSecondary",  new[] { "Copy to mirror →",                        "Auf Spiegelserver kopieren →" } },
-            { "btn.previewBackfill",  new[] { "Preview && restore…",                     "Vorschau && wiederherstellen…" } },
+            // Short on purpose: the full "Vorschau && wiederherstellen…" does not fit the
+            // action column at any readable size and was rendering as "Vorschau & wied…".
+            { "btn.previewBackfill",  new[] { "Preview && restore…",                     "Vorschau && Reparatur…" } },
             // Kept short on purpose: the action column is 148 px and the longer German
             // wording ("Reparatur-Verlauf / rückgängig…") was cut off mid-word.
             { "btn.history",          new[] { "Repair history / undo…",                  "Verlauf / rückgängig…" } },
@@ -326,6 +333,8 @@ namespace HistorianSyncTool.UI
             { "prog.undoing",         new[] { "Undoing a repair run…",                   "Mache Reparaturlauf rückgängig…" } },
 
             // ── Value chart ───────────────────────────────────────────────────────
+            { "chart.enlarge",        new[] { "⤢  Enlarge",                       "⤢  Vergrößern" } },
+            { "chart.enlargedTitle",  new[] { "Measured values",                  "Messwerte" } },
             { "hdr.values",           new[] { "MEASURED VALUES",                  "MESSWERTE" } },
             { "chart.empty",          new[] { "Open a measurement point to see its values from both servers.",
                                               "Eine Messstelle öffnen, um ihre Werte von beiden Servern zu sehen." } },
@@ -375,6 +384,13 @@ namespace HistorianSyncTool.UI
                                               "{0} von {1} Messstelle(n) geprüft — das Zeitlimit wurde erreicht." } },
             { "ov.scanRest",          new[] { "Check the rest",                   "Rest prüfen" } },
             { "ov.back",              new[] { "‹  All measurement points",        "‹  Alle Messstellen" } },
+            { "grid.emptyNotOnServer", new[] { "This measurement point is not set up on this server.",
+                                              "Diese Messstelle ist auf diesem Server nicht angelegt." } },
+            { "grid.emptyNoReadings", new[] { "No readings on this server in this period.",
+                                              "Keine Messwerte auf diesem Server in diesem Zeitraum." } },
+            // A read that failed must never be mistaken for "the server holds nothing".
+            { "grid.emptyReadFailed", new[] { "Could not load this server's readings — see the message at the bottom of the window.",
+                                              "Die Messwerte dieses Servers konnten nicht geladen werden — siehe Meldung am unteren Fensterrand." } },
             { "ov.estimateNote",      new[] { "A fast segment-level check, always a lower bound — open a point for the exact difference.",
                                               "Schnelle Prüfung auf Segmentebene, stets eine Untergrenze — für die genaue Differenz eine Messstelle öffnen." } },
             // Resolution is not a nicety: a gap shorter than one segment cannot appear here.

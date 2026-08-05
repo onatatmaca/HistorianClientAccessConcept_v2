@@ -10,6 +10,9 @@
     <Setting Name="SecondaryHostname" Type="System.String" Scope="User">
       <Value Profile="(Default)"></Value>
     </Setting>
+    <Setting Name="ServerHistory" Type="System.String" Scope="User">
+      <Value Profile="(Default)"></Value>
+    </Setting>
     <Setting Name="TagnameFilter" Type="System.String" Scope="User">
       <Value Profile="(Default)">*</Value>
     </Setting>
