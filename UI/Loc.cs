@@ -296,6 +296,8 @@ namespace HistorianSyncTool.UI
             { "msg.restoreDoneAdv",   new[] { "Restore finished: {0}/{1} batches across {2} point(s), {3} reading(s) written.",
                                               "Wiederherstellung abgeschlossen: {0}/{1} Blöcke über {2} Messstelle(n), {3} Messwert(e) geschrieben." } },
             { "msg.restoreCancelled", new[] { "Restore cancelled.",                      "Wiederherstellung abgebrochen." } },
+            { "msg.busy",             new[] { "Something is already running — please wait for it to finish.",
+                                              "Es läuft bereits ein Vorgang — bitte warten, bis er abgeschlossen ist." } },
             { "dlg.noneCompared",     new[] { "Nothing could be compared — {0} measurement point(s) failed to load. This does NOT mean the servers are in sync.",
                                               "Es konnte nichts verglichen werden — {0} Messstelle(n) konnten nicht geladen werden. Das bedeutet NICHT, dass die Server synchron sind." } },
             { "dlg.readyCountsPartial", new[] { "Ready — {0} point(s) to the mirror, {1} to the main server. {2} point(s) could not be compared and are not listed.",

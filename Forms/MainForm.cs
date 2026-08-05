@@ -145,6 +145,25 @@ namespace HistorianSyncTool.Forms
         private CancellationTokenSource _cts;
         private bool _isBusy;
 
+        /// <summary>
+        /// True for the WHOLE of an unattended run, not just the write itself.
+        ///
+        /// `_isBusy` is raised inside ExecuteBackfill, but a scheduled run first browses both
+        /// servers (about a second each on the live rig) and may run two directions in
+        /// sequence — and ExecuteBackfill's own `finally { SetBusy(false); }` clears the flag
+        /// between them. During those windows the main window is fully interactive (a headless
+        /// run shows no modal dialog), so a manual restore could start alongside it. That is not
+        /// just two writers on one connection: the manual run calls ResetCts(), which DISPOSES
+        /// the CancellationTokenSource the scheduled worker is holding and repoints _cts at
+        /// itself, leaving a production write that neither the Cancel button nor form-close can
+        /// stop. Manual entry points check <see cref="OperationInProgress"/>, not _isBusy.
+        /// </summary>
+        private bool _scheduledRunActive;
+
+        /// <summary>Any operation in flight, manual or unattended. Guard every entry point that
+        /// starts work with this — never with _isBusy alone.</summary>
+        private bool OperationInProgress => _isBusy || _scheduledRunActive;
+
         // ── Action buttons to disable during long ops ──────────────────────────────
         private List<Control> _actionButtons;
 
@@ -299,7 +318,11 @@ namespace HistorianSyncTool.Forms
                 btnConnect, btnBrowseTags, btnGetStats,
                 btnCompare,
                 btnCopyToPrimary, btnCopyToSecondary,
-                btnAnalyzeGaps, btnBackfillPreview, btnHistory,
+                // btnRestore is the SIMPLE view's only write action, and it was missing here —
+                // so the one button most users ever press stayed live during every operation,
+                // including a headless scheduled restore. btnBackfillPreview, which shares its
+                // handler, is Advanced-only, so in the shipping view there was no guard at all.
+                btnAnalyzeGaps, btnBackfillPreview, btnRestore, btnHistory,
                 btnTagLink
             };
 
@@ -341,7 +364,7 @@ namespace HistorianSyncTool.Forms
         /// </summary>
         private async Task TryRunScheduledOnStartup()
         {
-            if (_isBusy || _demoMode) return;
+            if (OperationInProgress || _demoMode) return;
             if (!Settings.Default.ScheduleEnabled || !Settings.Default.ScheduleRunOnStartup) return;
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected) return;
 
@@ -1076,13 +1099,29 @@ namespace HistorianSyncTool.Forms
             Log(message);
         }
 
+        /// <summary>
+        /// True (and tells the user) when something is already running, so the caller must not
+        /// start. Disabling the button is not enough on its own: a headless scheduled run leaves
+        /// the window fully interactive, and a manual restore can also be triggered inside the
+        /// 400 ms before the modal progress dialog appears.
+        /// </summary>
+        private bool BlockedByRunningOperation()
+        {
+            if (!OperationInProgress) return false;
+            SetStatus(Loc.T("msg.busy"), true);
+            return true;
+        }
+
         private void SetBusy(bool busy, string operationLabel = "")
         {
             if (InvokeRequired) { Invoke((Action)(() => SetBusy(busy, operationLabel))); return; }
             _isBusy = busy;
 
             foreach (var btn in _actionButtons)
-                btn.Enabled = !busy;
+                // Stay disabled for the whole unattended run: ExecuteBackfill clears _isBusy in
+                // its finally, which used to re-enable every action button between the two
+                // directions of a scheduled Both run.
+                btn.Enabled = !(busy || _scheduledRunActive);
 
             if (busy)
             {
@@ -1191,6 +1230,14 @@ namespace HistorianSyncTool.Forms
         /// </summary>
         private void ResetCts()
         {
+            // There must never be two operations in flight: this disposes the token source the
+            // other one is still holding, so its Cancel button — and OnFormClosing — would stop
+            // working, leaving an unstoppable write to a production historian. Every entry point
+            // is gated by BlockedByRunningOperation(); shout if a new one forgets.
+            if (OperationInProgress)
+                System.Diagnostics.Trace.TraceWarning(
+                    "ResetCts() while an operation is already running — the running operation " +
+                    "just became uncancellable. An entry point is missing its busy guard.");
             try { _cts?.Dispose(); } catch { }
             _cts = new CancellationTokenSource();
         }
@@ -2010,6 +2057,7 @@ namespace HistorianSyncTool.Forms
 
         private async void btnCopyToSecondary_Click(object sender, EventArgs e)
         {
+            if (BlockedByRunningOperation()) return;
             // Same live-edge clamp as the backfill itself, so the dialog's "Will copy"
             // numbers match exactly what ExecuteBackfill will write.
             DateTime from = dtpStart.Value;
@@ -2028,6 +2076,7 @@ namespace HistorianSyncTool.Forms
 
         private async void btnCopyToPrimary_Click(object sender, EventArgs e)
         {
+            if (BlockedByRunningOperation()) return;
             DateTime from = dtpStart.Value;
             DateTime to   = ClampLiveEdge(dtpEnd.Value);
             if (from >= to) { SetStatus(Loc.T("msg.rangeInvalid"), true); return; }
@@ -2051,6 +2100,7 @@ namespace HistorianSyncTool.Forms
 
         private async void btnBackfillPreview_Click(object sender, EventArgs e)
         {
+            if (BlockedByRunningOperation()) return;
             if (!_connections.IsPrimaryConnected || !_connections.IsSecondaryConnected)
             { SetStatus(Loc.T("msg.needBoth"), true); return; }
 
@@ -2238,7 +2288,14 @@ namespace HistorianSyncTool.Forms
                         var copySet = new HashSet<DateTime>(plan.ToCopy);
                         var missing = srcData
                             .Where(s => copySet.Contains(s.Time))
-                            .OrderBy(s => s.Time)
+                            // By the real instant, not the local clock. Sorting local ticks
+                            // interleaves the two halves of the repeated autumn hour, and the
+                            // verify window below is built from the FIRST and LAST element: with
+                            // them out of order, vStart converts to a LATER UTC instant than
+                            // vEnd, the re-read loop never runs, and a batch that was written
+                            // correctly is reported "0/N landed" — and then not journaled, so
+                            // real samples on the server become unrevertable.
+                            .OrderBy(s => s.Time.ToUniversalTime())
                             .ToList();
 
                         if (missing.Count == 0)
@@ -2478,6 +2535,8 @@ namespace HistorianSyncTool.Forms
 
         private async void btnHistory_Click(object sender, EventArgs e)
         {
+            // Undo deletes from a production server — it must never start alongside a run.
+            if (BlockedByRunningOperation()) return;
             var entries = BackfillJournalService.LoadAll();
             using (var dlg = new BackfillHistoryDialog(entries))
             {
@@ -2677,8 +2736,19 @@ namespace HistorianSyncTool.Forms
             // Headless: a scheduled run (and its auto-refresh) must never pop the modal
             // progress dialog in the user's face — the status bar + file log cover it.
             _suppressOpDialog = true;
+            // Held for the WHOLE run — the browses before the first write, and the gap between
+            // two directions where ExecuteBackfill's own finally has already cleared _isBusy.
+            // Without it a manual restore can start in those windows and destroy the scheduled
+            // run's cancellation token. See the field comment.
+            _scheduledRunActive = true;
             try { await RunScheduledBackfillCoreAsync(); }
-            finally { _suppressOpDialog = false; }
+            finally
+            {
+                _suppressOpDialog = false;
+                _scheduledRunActive = false;
+                // Re-enable what SetBusy kept disabled for the duration of the run.
+                if (!_isBusy) foreach (var btn in _actionButtons) btn.Enabled = true;
+            }
         }
 
         private async Task RunScheduledBackfillCoreAsync()

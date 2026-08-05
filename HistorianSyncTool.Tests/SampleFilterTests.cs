@@ -14,6 +14,58 @@ namespace HistorianSyncTool.Tests
         private static (DateTime, object, double) S(int secs, object value, double q = 100.0)
             => (Anchor.AddSeconds(secs), value, q);
 
+        // ── ToSecondTicks: the identity every diff, verify and journal is keyed on ──
+
+        [TestMethod]
+        public void ToSecondTicks_TwoInstantsAnHourApartNeverShareAKey()
+        {
+            // THE regression. Keyed on local ticks, the two halves of the autumn change-over
+            // hour collapse onto one key, so a mirror outage inside it looks already-present in
+            // every HashSet lookup and is never restored. Written against real UTC instants and
+            // converted to local, so it holds in any time zone (in a zone without DST the two
+            // are trivially distinct; in W. Europe these two ARE the repeated hour).
+            var utcA = new DateTime(2026, 10, 25, 0, 30, 0, DateTimeKind.Utc);
+            var utcB = new DateTime(2026, 10, 25, 1, 30, 0, DateTimeKind.Utc);
+
+            Assert.AreNotEqual(
+                SampleFilter.ToSecondTicks(utcA.ToLocalTime()),
+                SampleFilter.ToSecondTicks(utcB.ToLocalTime()),
+                "two readings a real hour apart must never share a key");
+        }
+
+        [TestMethod]
+        public void ToSecondTicks_IsTheSameKeyWhicheverFrameYouPassIt()
+        {
+            // The planner passes local times, the journal passes UTC. They must agree, or a
+            // revert would delete at a different instant than the diff decided to write.
+            var utc = new DateTime(2026, 3, 14, 9, 17, 42, DateTimeKind.Utc);
+
+            Assert.AreEqual(SampleFilter.ToSecondTicks(utc),
+                            SampleFilter.ToSecondTicks(utc.ToLocalTime()));
+        }
+
+        [TestMethod]
+        public void ToSecondTicks_TruncatesSubSecondToTheStoredSecond()
+        {
+            var utc = new DateTime(2026, 3, 14, 9, 17, 42, DateTimeKind.Utc).AddMilliseconds(123);
+
+            Assert.AreEqual(SampleFilter.ToSecondTicks(new DateTime(2026, 3, 14, 9, 17, 42, DateTimeKind.Utc)),
+                            SampleFilter.ToSecondTicks(utc),
+                            "12:54:30.123 has to match the 12:54:30 Historian stores");
+        }
+
+        [TestMethod]
+        public void ToSecondTicks_UtcInputIsUnchanged_SoLegacyJournalsStillRevert()
+        {
+            // Journal files on disk hold UTC second ticks. If this ever started re-converting
+            // them, every existing entry would revert at an instant 1-2 h off — i.e. delete real
+            // plant data. Pin it.
+            var utc = new DateTime(2026, 7, 1, 13, 45, 0, DateTimeKind.Utc);
+            long expected = utc.Ticks - (utc.Ticks % TimeSpan.TicksPerSecond);
+
+            Assert.AreEqual(expected, SampleFilter.ToSecondTicks(utc));
+        }
+
         // ── Parse (no clipping) ────────────────────────────────────────────────────
 
         [TestMethod]

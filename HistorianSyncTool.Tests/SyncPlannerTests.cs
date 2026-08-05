@@ -16,6 +16,55 @@ namespace HistorianSyncTool.Tests
         private static List<DateTime> Every(DateTime start, TimeSpan step, int count) =>
             Enumerable.Range(0, count).Select(i => start + TimeSpan.FromTicks(step.Ticks * i)).ToList();
 
+        // ── A high match rate is not enough on its own (Phase 13 audit) ───────────
+
+        [TestMethod]
+        public void Plan_HighMatchRateButSymmetricShortfall_IsNotAligned()
+        {
+            // THE regression. Two collectors on their own clocks land on the same second most
+            // of the time, so the match rate clears 90 % — but each holds a similar share the
+            // other lacks. An exact diff then proposes copying that share in BOTH directions,
+            // which repairs nothing and interleaves the two streams into the archive forever.
+            //
+            // Modelled on the live measurement: ~91 % match with ~8-9 % one-sided on each side
+            // (STAT6.TEMP_02_MB01_SCALE: 983 readings to the mirror AND 980 back to the main).
+            var src = new List<DateTime>();
+            var tgt = new List<DateTime>();
+            for (int i = 0; i < 1000; i++)
+            {
+                var t = T0.AddSeconds(10 * i);
+                // 91 % shared, then ~9 % exclusive to each side at DIFFERENT seconds.
+                if (i % 11 == 0) { src.Add(t); tgt.Add(t.AddSeconds(3)); }
+                else             { src.Add(t); tgt.Add(t); }
+            }
+
+            var plan = SyncPlanner.Plan(src, tgt, T0, T0.AddSeconds(10000), Floor, Mult);
+
+            Assert.IsTrue(plan.MatchRate >= 0.90, "precondition: the match rate must clear the old bar");
+            Assert.IsTrue(plan.OneSidedShare > SyncPlanner.SymmetricShortfallThreshold,
+                "both sides hold a similar exclusive share");
+            Assert.IsFalse(plan.StreamsAligned,
+                "symmetric shortfall means independent collectors, whatever the match rate says");
+            Assert.IsFalse(plan.UsedExactDiff);
+        }
+
+        [TestMethod]
+        public void Plan_OneSidedShortfall_StaysAligned_EvenWhenLarge()
+        {
+            // The mirror-image case, which must NOT be caught: the target is missing a big
+            // block the source has, and holds nothing the source lacks. That is exactly what a
+            // restore exists to repair, so it must stay in exact-diff mode.
+            var src = Every(T0, TimeSpan.FromSeconds(10), 1000);
+            var tgt = src.Take(910).ToList();          // 9 % missing, entirely one-sided
+
+            var plan = SyncPlanner.Plan(src, tgt, T0, T0.AddSeconds(10000), Floor, Mult);
+
+            Assert.AreEqual(0.0, plan.OneSidedShare, 1e-9, "the target holds nothing the source lacks");
+            Assert.IsTrue(plan.StreamsAligned);
+            Assert.IsTrue(plan.UsedExactDiff);
+            Assert.AreEqual(90, plan.ToCopy.Count);
+        }
+
         // ── Aligned streams (same-source data) → exact-second diff ────────────────
 
         [TestMethod]

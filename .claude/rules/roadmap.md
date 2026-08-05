@@ -133,15 +133,26 @@ red. Both were the same defect — see the measured table in
       confirm a number the app no longer claims. Update it, then re-run against the detail card
 - [ ] Fill test gaps found; all probes green
 
-### The three that must be decided before v1.0 (detail in `audit-phase13.md`)
-- [ ] **The planner would write ~41 k phantom readings on a real pair.** Measured on
-      `TEMPRL_01_BHKW02_SCALE` over a year: match **90.6 %** (just over the threshold) → exact-diff
-      → **21,306 → mirror AND 19,746 → main**. Both directions at once is the independence
-      signature; the threshold alone does not catch it
-- [ ] **Failed reads are presented as empty servers on the write path** — both preview dialogs
-      and `SafeReadTimes`, all three re-introducing the hole `ThrowOnItemErrors` exists to close
-- [ ] **A restore that cannot be journaled still reports success** and is unrevertable — which is
-      exactly what a read-only install folder produces
+### All eight HIGH findings fixed (2026-08-05) ✅ — measurements in `audit-phase13.md`
+- [x] **The planner was proposing ~72 k phantom writes.** Swept all 72 shared points over 30 days:
+      the match rate cannot separate aligned pairs from independent collectors (14 offenders sat
+      at 90.8–97.5 %). The signal is SYMMETRY — both servers holding a similar share the other
+      lacks, which no aligned pair does. Live, the populations are **250x apart** (0.01 % vs
+      2.54–9.18 %), so aligned now also requires `OneSidedShare <= 1 %`. Re-measured:
+      **146,670 → 74,502** planned writes, exact-diff points **17 → 3**, both-direction offenders
+      **14 → 0**, and the healthy pair still finds its real 5 → mirror / 3 → main
+- [x] **Failed reads are no longer presented as empty servers** — `SafeReadTimes` returns null
+      (which callers already treat as "not read"), and neither preview dialog substitutes an
+      empty list or claims "in sync" over points it could not compare
+- [x] **A restore that cannot be journaled now says so** instead of reporting success on data it
+      can never undo
+- [x] **One operation at a time** — `btnRestore` is disabled during runs, every write entry point
+      is gated, and the gate covers the WHOLE unattended run, so a manual restore can no longer
+      dispose the scheduled run's cancellation token
+- [x] **DST-ambiguous keys** — diff/verify keys are UTC, so the repeated autumn hour cannot make
+      two instants share an identity; journal ticks on disk unchanged (pinned by a test)
+- [x] **A total one-server outage** is counted and sorted first instead of painted green
+- [x] **The scheduler cannot silently widen its own scope** to the `*` mask
 
 ## Phase 14 — v1.0 for office testing
 - [ ] Version 1.0.0, installer, single-folder deployment

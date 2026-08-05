@@ -13,14 +13,31 @@ namespace HistorianSyncTool.Services
     public static class SampleFilter
     {
         /// <summary>
-        /// Truncates a timestamp to whole-second resolution — the precision Historian
-        /// actually stores at. The backfill diff and verify compare at this resolution so
-        /// a sub-second source timestamp (e.g. 12:54:30.123) matches the second it gets
-        /// stored as (12:54:30). Without this the diff never matches a written sample and
-        /// keeps "finding" it missing — re-copying it forever.
+        /// A timestamp as whole seconds since the epoch **in UTC** — the identity every diff,
+        /// verify and journal entry is keyed on.
+        ///
+        /// Whole seconds because that is the precision Historian stores at: a sub-second source
+        /// timestamp (12:54:30.123) has to match the second it becomes (12:54:30), or the diff
+        /// never matches what it just wrote and re-copies it forever.
+        ///
+        /// UTC because the LOCAL clock is not a unique name for an instant. On the autumn
+        /// change-over the local hour repeats, so two readings a real hour apart produced the
+        /// SAME key — proven on a W. Europe machine: localTicksEqual, dateTimeEquals and
+        /// hashEqual were all true for 00:30 and 01:30 UTC. A mirror outage confined to that
+        /// repeated hour therefore looked already-present in every HashSet lookup here, so the
+        /// planner reported "in sync" and the hour was never restored, on every run, forever.
+        ///
+        /// Kind matters: values from HistorianDataService are Local and carry .NET's
+        /// ambiguous-time flag (set by ToLocalTime), so ToUniversalTime recovers the exact
+        /// instant. A value already tagged Utc is used as-is — which is what the backfill
+        /// journal passes, so journal ticks on disk are unchanged and legacy entries still
+        /// revert identically.
         /// </summary>
-        public static long ToSecondTicks(DateTime t) =>
-            t.Ticks - (t.Ticks % TimeSpan.TicksPerSecond);
+        public static long ToSecondTicks(DateTime t)
+        {
+            long ticks = t.Kind == DateTimeKind.Utc ? t.Ticks : t.ToUniversalTime().Ticks;
+            return ticks - (ticks % TimeSpan.TicksPerSecond);
+        }
 
         public static List<(DateTime Time, float Value, double Quality)> ParseAndClip(
             IEnumerable<(DateTime Time, object Value, double Quality)> raw,

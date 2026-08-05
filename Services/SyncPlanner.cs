@@ -16,6 +16,15 @@ namespace HistorianSyncTool.Services
         public double MatchRate { get; set; }
 
         /// <summary>
+        /// The SMALLER of the two one-sided shares: how much each server holds that the other
+        /// lacks, taking whichever is smaller. Near zero means the difference is one-sided —
+        /// isolated misses on one server, which is what a restore can repair. A substantial
+        /// value on both sides means the two are simply recording on different clocks, and
+        /// copying between them would interleave both streams rather than fill anything.
+        /// </summary>
+        public double OneSidedShare { get; set; }
+
+        /// <summary>
         /// True when both servers hold the same timestamp stream (same-source data such
         /// as HistSync or samples this tool wrote). Exact-second diff is used then —
         /// it catches isolated missing samples that outage detection cannot.
@@ -55,8 +64,20 @@ namespace HistorianSyncTool.Services
     /// </summary>
     public static class SyncPlanner
     {
-        /// <summary>Exact-second match rate at/above which streams count as aligned.</summary>
+        /// <summary>Exact-second match rate at/above which streams may count as aligned.</summary>
         public const double AlignedMatchRateThreshold = 0.90;
+
+        /// <summary>
+        /// Largest SMALLER-side one-sided share still consistent with aligned streams.
+        ///
+        /// Aligned streams differ by isolated misses, so one side's remainder is ~0; two
+        /// independent collectors differ symmetrically. Measured live over 30 days on all 72
+        /// shared points: aligned pairs sit at 0.01 %, independent pairs at 2.54 %-9.18 %, with
+        /// nothing in between. 1 % sits 100x above the first group and 2.5x below the second.
+        /// Re-measure with tools\probes\probe-planner-sweep.ps1 before touching this — it
+        /// decides what a restore WRITES.
+        /// </summary>
+        public const double SymmetricShortfallThreshold = 0.01;
 
         /// <summary>Below this many samples per side interval statistics are meaningless.</summary>
         public const int MinSamplesForStats = 20;
@@ -133,7 +154,41 @@ namespace HistorianSyncTool.Services
 
             int matched = src.Count(t => tgtSeconds.Contains(SampleFilter.ToSecondTicks(t)));
             plan.MatchRate = (double)matched / src.Count;
-            plan.StreamsAligned = plan.MatchRate >= AlignedMatchRateThreshold;
+
+            // The match rate alone is not enough to call two streams aligned, and getting this
+            // wrong writes phantom data into a production archive.
+            //
+            // Aligned streams (same source: HistSync, or data this tool copied) differ by
+            // ISOLATED misses — one server dropped a few readings the other kept. So the
+            // unmatched remainder is essentially ONE-SIDED.
+            //
+            // Two independent collectors sampling the same signal on their own clocks also
+            // match often — whenever both happen to land on the same second — but their
+            // unmatched remainders are SYMMETRIC: each holds a similar share the other lacks.
+            // Copying that difference does not repair anything; it interleaves both collectors'
+            // streams into the archive, permanently, in both directions.
+            //
+            // Measured live over 30 days across all 72 shared points (probe-planner-sweep.ps1),
+            // the two populations do not overlap — they are 250x apart:
+            //
+            //   genuinely aligned (3 points)   smaller one-sided share = 0.01 %  (match 100.0 %)
+            //   independent pairs (14 points)  smaller one-sided share = 2.54 % .. 9.18 %
+            //                                  (match 90.8 % .. 97.5 %  <-- all "aligned" before)
+            //
+            // Every one of those 14 sat above the 90 % match threshold and would have been
+            // exact-diffed: e.g. TEMP_01_F02 proposed 1,038 readings to the mirror AND 1,047
+            // back to the main server. Both servers cannot be missing the same 8 % from each
+            // other. Raising the match threshold cannot separate them (97.5 % is higher than
+            // several healthy pairs); the symmetry is the signal, so test that instead.
+            var srcSeconds = new HashSet<long>(src.Select(SampleFilter.ToSecondTicks));
+            int tgtMatched = tgt.Count(t => srcSeconds.Contains(SampleFilter.ToSecondTicks(t)));
+            double srcOnlyShare = (double)(src.Count - matched) / src.Count;
+            double tgtOnlyShare = tgt.Count > 0
+                ? (double)(tgt.Count - tgtMatched) / tgt.Count : 0.0;
+            plan.OneSidedShare = Math.Min(srcOnlyShare, tgtOnlyShare);
+
+            plan.StreamsAligned = plan.MatchRate >= AlignedMatchRateThreshold
+                                  && plan.OneSidedShare <= SymmetricShortfallThreshold;
 
             plan.Cadence = IntervalBuilder.PercentileInterval(src, 0.90);
             plan.OutageThreshold = GapRule(src, minGapFloor, thresholdMultiplier);

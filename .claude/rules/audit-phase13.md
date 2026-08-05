@@ -25,7 +25,7 @@ figure it derived was ~14x too large ("380 MB of row objects", "330 MB transient
 costs: row-object duplication **13.7 MB**, the duplicate read **12.7 MB**, the planner **10.1 MB**.
 Real, worth fixing, and nowhere near the x86 ceiling. Do not re-open these as emergencies.
 
-## CRITICAL / HIGH — open, needs a decision before v1.0
+## CRITICAL / HIGH — all eight FIXED (2026-08-05), measured below
 
 **1. `SyncPlanner` takes the exact-diff branch on two independent collectors, and would write
 ~41 k phantom readings.** Measured above: match rate **90.6 %**, just over the 90 % threshold, so
@@ -87,6 +87,66 @@ case the list hides. (Code confirmed; the green verdict follows from `InSync` �
 `Forms/SchedulerSettingsDialog.cs:302` rebuilds `ScheduleTagList` from a list box that is empty
 whenever nothing has been browsed, while `ScheduleUseTagList` stays true → `MainForm.cs:2676`
 degrades to the mask. "Only these 3 points" silently becomes every shared point.
+
+## How each was fixed, and what it measured afterwards
+
+**H1 — the planner now tests SYMMETRY, not just the match rate.** Swept all 72 shared points
+over 30 days (`tools/probes/probe-planner-sweep.ps1`) and the two populations turned out not to
+overlap at all — they are **250x apart**:
+
+| | points | smaller one-sided share | match rate |
+|---|---|---|---|
+| genuinely aligned | 3 | **0.01 %** | 100.0 % |
+| independent collectors | 14 | **2.54 – 9.18 %** | 90.8 – 97.5 % |
+
+All 14 were above the 90 % match bar and were being exact-diffed. Raising the match threshold
+cannot separate them — 97.5 % is higher than several healthy pairs. The signal is that both
+servers hold a similar share the other lacks, which no aligned pair does. `SyncPlan.OneSidedShare`
+is now `min(srcOnly, tgtOnly)` and aligned requires it `<= 1 %` as well.
+
+Measured on the same live window, before → after:
+
+| | → mirror | → main | total |
+|---|---|---|---|
+| before | 73,144 | 73,526 | 146,670 |
+| after | 37,015 | 37,487 | **74,502** |
+
+**72,168 phantom writes prevented — about half of everything a full bidirectional restore would
+have written.** Exact-diff points 17 → 3; points wanting >2 % copied in BOTH directions 14 → 0.
+And the repair capability is intact: `STAT6.BHKW_01_GAS.F_CV` still reports exactly **5 → mirror,
+3 → main**, unchanged, which is the Phase 12d verified value.
+
+**H6 — keys are UTC now, and the effect is honest: no number moved.** `ToSecondTicks` converts to
+UTC before truncating, so the repeated autumn hour can no longer collapse two instants onto one
+key, and `ExecuteBackfill` sorts by the real instant so the verify window cannot invert. Re-measured
+live: identical results on both a DST-free window and a year-long window spanning two change-overs.
+That is expected — a collision needs two readings on the same local SECOND in both halves of the
+repeated hour, which is rare at this point's ~140 s cadence and certain at 1 s. The value is that
+it can no longer happen, not a number that moved. Journal ticks on disk are unchanged (the journal
+passes an already-UTC value, which is used as-is), so legacy entries still revert identically —
+pinned by a test.
+
+**H2/H3 — a failed read is no longer an empty server.** `SafeReadTimes` returns `null`, which the
+existing callers already treat as "not read" and exclude from analysis, feasibility and planning;
+both preview dialogs let the failure surface instead of substituting an empty list, mark the row
+`err`, untick and lock it, and count points they could not compare so "In sync" is never claimed
+over failed reads.
+
+**H4 — one operation at a time.** `btnRestore` joined `_actionButtons`; every write entry point
+now calls `BlockedByRunningOperation()`, which checks `_scheduledRunActive` as well as `_isBusy`.
+The scheduled flag is held for the WHOLE unattended run — including the browses before the first
+write and the gap between two directions where `ExecuteBackfill`'s own `finally` had already
+cleared `_isBusy`. `ResetCts` now traces a warning if it ever runs while something is in flight,
+so a future entry point that forgets its guard announces itself instead of silently making a
+production write uncancellable.
+
+**H5** returns `bool`; the caller reports the failure and leaves `JournalId` unset rather than
+claiming success. **H7** counts a total one-server outage as everything the other server holds.
+**H8** preserves the saved tag list when the picker was never populated and refuses to save an
+empty explicit selection.
+
+Tests: **127 green** (was 118), including the symmetric-shortfall case, its one-sided mirror image
+that must NOT be caught, the DST key collision, and the journal-frame pin.
 
 ## MEDIUM — recorded, not urgent
 
