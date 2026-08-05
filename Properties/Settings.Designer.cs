@@ -226,5 +226,52 @@ namespace HistorianSyncTool.Properties
             get { return (bool)this["AutoConnectOnStartup"]; }
             set { this["AutoConnectOnStartup"] = value; }
         }
+
+        /// <summary>
+        /// True until this build has imported the settings of the previously installed version.
+        /// Defaults to True, and a fresh user.config for a NEW version defaults it to True
+        /// again — which is exactly the signal that an upgrade just happened.
+        /// </summary>
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool SettingsUpgradeRequired
+        {
+            get { return (bool)this["SettingsUpgradeRequired"]; }
+            set { this["SettingsUpgradeRequired"] = value; }
+        }
+
+        /// <summary>
+        /// Carry the previous version's saved settings into this build, once.
+        ///
+        /// User-scoped settings live in a per-VERSION folder
+        /// (%LOCALAPPDATA%\HistorianSyncTool\...\&lt;version&gt;\user.config), so the moment
+        /// AssemblyVersion changes, .NET starts from an empty file and every stored value is
+        /// gone: both server addresses and the address history, the language, the Advanced
+        /// toggle, and the whole scheduler configuration — which silently reverts to interval
+        /// 60, direction Both and mask '*'. Nothing tells the user; the app simply looks
+        /// factory-fresh after an update, and an unattended repair would run against defaults
+        /// nobody chose.
+        ///
+        /// Upgrade() finds the newest previous version's file and imports it. It must run
+        /// BEFORE anything reads a setting, so it is called first thing in Program.Main.
+        /// </summary>
+        public void UpgradeFromPreviousVersion()
+        {
+            if (!SettingsUpgradeRequired) return;
+            try
+            {
+                Upgrade();
+            }
+            catch (global::System.Configuration.ConfigurationErrorsException ex)
+            {
+                // A corrupt or unreadable previous user.config must not stop the app starting.
+                // Losing the old settings is bad; refusing to launch is worse.
+                global::System.Diagnostics.Trace.TraceError(
+                    "Could not import the previous version's settings: " + ex);
+            }
+            SettingsUpgradeRequired = false;
+            Save();
+        }
     }
 }

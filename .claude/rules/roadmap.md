@@ -154,8 +154,32 @@ red. Both were the same defect — see the measured table in
 - [x] **A total one-server outage** is counted and sorted first instead of painted green
 - [x] **The scheduler cannot silently widen its own scope** to the `*` mask
 
-## Phase 14 — v1.0 for office testing
-- [ ] Version 1.0.0, installer, single-folder deployment
+## Phase 14 — release for office testing (2026-08-05)
+- [x] **Version 2.1.0.0.** Deliberately UP, not down to "1.0": user settings live in a
+      per-version folder and `Settings.Upgrade()` imports only from a STRICTLY LOWER version, so
+      numbering backwards would have silently wiped every tester's saved servers, language and
+      schedule — the exact failure the upgrade code exists to prevent
+- [x] **`Settings.UpgradeFromPreviousVersion()`**, called first thing in `Program.Main` before
+      anything reads a setting. **Proven, not assumed**: seeded `ScheduleIntervalMinutes=97` into
+      the 2.0.0.0 `user.config`, deleted the 2.1.0.0 folder, relaunched — the value appears in the
+      new file and `SettingsUpgradeRequired` flips to False so it imports once, not every launch
+- [x] `Settings.settings` and `Settings.Designer.cs` are back in sync (4 settings existed only in
+      the generated file — opening the VS designer would have deleted them and broken the build)
+- [x] **Single-folder deployment** — `tools\package.ps1` builds `HistorianSyncTool-2.1.0.zip`
+      (exe + config + Proficy DLL + both manuals, ~750 KB). Unzip anywhere, no admin rights.
+      It refuses to package a config containing a password. Deliberately NOT Program Files: the
+      revert journal is written beside the exe, and a read-only folder makes a restore
+      unrevertable
+- [x] **User documentation EN + DE**, structured after the customer's own 2017 portal manual
+      (glossary → prerequisites → screen-by-screen → the cross-cutting concepts → appendix).
+      Source is `docs\manual-*.md`; `tools\build-docs.ps1` renders self-contained HTML that
+      prints to PDF from any browser
+- [ ] Screenshots: only the all-points overview is captured. Synthetic clicking does NOT drive
+      this app (PostMessage move/click/dblclick reaches the control but neither the owner-drawn
+      list nor the EN/DE toggle responds), so the remaining figures need a human at the keyboard
+      plus `tools\shot.ps1 -Attach`
+- [ ] Ask whoever owns the GE relationship about redistributing `Proficy.Historian.ClientAccess.API.dll`
+      in the hand-out zip
 - [ ] User documentation ≤10 pages, EN + DE, with screenshots: install, configure, use
 
 ---

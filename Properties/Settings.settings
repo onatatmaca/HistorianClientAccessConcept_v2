@@ -58,5 +58,25 @@
     <Setting Name="TagLinkEnabled" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">True</Value>
     </Setting>
+    <!-- These four were only ever hand-written into Settings.Designer.cs. Opening this file
+         in the Visual Studio designer regenerates the .Designer.cs FROM HERE, which silently
+         deleted them and broke the build. Keep the two files in step. -->
+    <Setting Name="Language" Type="System.String" Scope="User">
+      <Value Profile="(Default)">En</Value>
+    </Setting>
+    <Setting Name="AdvancedMode" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="ScheduleStartupConfirmed" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="AutoConnectOnStartup" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">True</Value>
+    </Setting>
+    <!-- True until this build has imported the previous version's user.config. See
+         Settings.UpgradeFromPreviousVersion(). -->
+    <Setting Name="SettingsUpgradeRequired" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">True</Value>
+    </Setting>
   </Settings>
 </SettingsFile>

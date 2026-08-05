@@ -182,12 +182,15 @@ namespace HistorianSyncTool.Forms
             var sel = Selected;
             if (sel == null || sel.Reverted) return;
 
+            // ServerNaming, not the raw label: "Secondary" is an internal storage value that
+            // appears nowhere else on screen, and this is the one dialog where the user must be
+            // certain WHICH server they are about to delete from.
             var confirm = MessageBox.Show(this,
-                $"Permanently delete {sel.TotalSamples:N0} sample(s) across {sel.TagCount} tag(s) " +
-                $"from {sel.TargetLabel} ({sel.TargetHost})?\n\n" +
-                $"This was the backfill run from {sel.RunLocal:yyyy-MM-dd HH:mm:ss}.\n" +
-                "Only the samples that run wrote are removed. This cannot be undone.",
-                "Confirm revert",
+                Loc.F("undo.confirm.body",
+                    sel.TotalSamples.ToString("N0"), sel.TagCount,
+                    Services.ServerNaming.Short(sel.TargetLabel, sel.TargetHost),
+                    sel.RunLocal.ToString("yyyy-MM-dd HH:mm:ss")),
+                Loc.T("undo.confirm.title"),
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
 
             if (confirm != DialogResult.Yes) return;

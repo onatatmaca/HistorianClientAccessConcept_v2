@@ -296,6 +296,20 @@ namespace HistorianSyncTool.UI
             { "msg.restoreDoneAdv",   new[] { "Restore finished: {0}/{1} batches across {2} point(s), {3} reading(s) written.",
                                               "Wiederherstellung abgeschlossen: {0}/{1} Blöcke über {2} Messstelle(n), {3} Messwert(e) geschrieben." } },
             { "msg.restoreCancelled", new[] { "Restore cancelled.",                      "Wiederherstellung abgebrochen." } },
+            // The two confirmations that gate writing to, and deleting from, a production
+            // historian. These were the last hardcoded-English dialogs in the app, which is the
+            // worst possible pair to leave untranslated for a German operator.
+            { "startup.title",        new[] { "Automatic repair on startup",
+                                              "Automatische Reparatur beim Start" } },
+            { "startup.body",         new[] { "This tool is set to run an automatic repair immediately after startup.\r\n\r\nIt would copy missing readings between the two servers without asking again.\r\n\r\nStart automatic repairs on startup from now on?",
+                                              "Dieses Programm ist so eingestellt, dass direkt nach dem Start eine automatische Reparatur läuft.\r\n\r\nDabei würden fehlende Messwerte ohne weitere Rückfrage zwischen den beiden Servern kopiert.\r\n\r\nAutomatische Reparatur beim Start ab jetzt ausführen?" } },
+            { "undo.confirm.title",   new[] { "Confirm undo",                            "Rückgängig bestätigen" } },
+            { "undo.confirm.body",    new[] { "Permanently delete {0} reading(s) across {1} measurement point(s) from {2}?\r\n\r\nThis was the repair run from {3}.\r\nOnly the readings that run wrote are removed. This cannot be undone.",
+                                              "{0} Messwert(e) in {1} Messstelle(n) endgültig von {2} löschen?\r\n\r\nDies war der Reparaturlauf vom {3}.\r\nEs werden nur die Messwerte entfernt, die dieser Lauf geschrieben hat. Das kann nicht rückgängig gemacht werden." } },
+            { "prog.tagOf",           new[] { "Point {0} of {1} — {2}",
+                                              "Messstelle {0} von {1} — {2}" } },
+            { "prog.comparing",       new[] { "Point {0} of {1}: {2} — comparing…",
+                                              "Messstelle {0} von {1}: {2} — wird verglichen…" } },
             { "msg.busy",             new[] { "Something is already running — please wait for it to finish.",
                                               "Es läuft bereits ein Vorgang — bitte warten, bis er abgeschlossen ist." } },
             { "dlg.noneCompared",     new[] { "Nothing could be compared — {0} measurement point(s) failed to load. This does NOT mean the servers are in sync.",

@@ -20,6 +20,12 @@ namespace HistorianSyncTool
                 string.Equals(a, "--demo", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(a, "/demo", StringComparison.OrdinalIgnoreCase));
 
+            // BEFORE any setting is read. User-scoped settings live in a per-VERSION folder, so
+            // without this every stored value — both server addresses, the address history, the
+            // language, the Advanced toggle and the entire scheduler configuration — silently
+            // reverts to defaults the first time a tester launches a new build.
+            Properties.Settings.Default.UpgradeFromPreviousVersion();
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Forms.MainForm());

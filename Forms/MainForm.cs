@@ -371,10 +371,7 @@ namespace HistorianSyncTool.Forms
             if (!Settings.Default.ScheduleStartupConfirmed)
             {
                 var ok = MessageBox.Show(this,
-                    "This tool is set to run an automatic repair immediately after startup.\n\n" +
-                    "It would copy missing readings between the two servers without asking again.\n\n" +
-                    "Start automatic repairs on startup from now on?",
-                    "Automatic repair on startup",
+                    Loc.T("startup.body"), Loc.T("startup.title"),
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
                     MessageBoxDefaultButton.Button2);
                 if (ok != DialogResult.Yes)
@@ -1125,7 +1122,10 @@ namespace HistorianSyncTool.Forms
 
             if (busy)
             {
-                _pendingOpTitle = string.IsNullOrWhiteSpace(operationLabel) ? "Working…" : operationLabel;
+                // prog.working existed but was never used, so every browse/read/check showed a
+                // progress dialog headed "Working…" even in German.
+                _pendingOpTitle = string.IsNullOrWhiteSpace(operationLabel)
+                    ? Loc.T("prog.working") : operationLabel;
                 if (!_suppressOpDialog)
                 {
                     _progressShowTimer.Stop();
@@ -2251,9 +2251,14 @@ namespace HistorianSyncTool.Forms
 
                         Invoke((Action)(() =>
                         {
+                            // Localised, and NOT the word "tag": in German "Tag 3 / 12" reads as
+                            // DAY 3 of 12, on the progress dialog of a live restore. The
+                            // activity log stays technical (Advanced-only), the two
+                            // user-facing lines do not.
                             Log($"── Tag {tagIdx + 1}/{totalTags}: {tag} — comparing servers ──");
-                            SetStatus($"Tag {tagIdx + 1}/{totalTags}: {tag} — comparing…");
-                            SetPhaseProgress(tagIdx + 1, totalTags, $"Tag {tagIdx + 1} / {totalTags} — {tag}");
+                            SetStatus(Loc.F("prog.comparing", tagIdx + 1, totalTags, tag));
+                            SetPhaseProgress(tagIdx + 1, totalTags,
+                                Loc.F("prog.tagOf", tagIdx + 1, totalTags, tag));
                         }));
 
                         // Read both servers for the full eval range
