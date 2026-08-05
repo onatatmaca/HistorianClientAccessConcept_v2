@@ -92,7 +92,6 @@ namespace HistorianSyncTool.Forms
         private SectionHeader  hdrOverview;
         private TextBox        txtOverviewSearch;
         private Label          lblOverviewSummary;
-        private FlatButton     btnScanRest;
         private TagOverviewList lstOverview;
 
         // Center card 2 — one measurement point in detail
@@ -871,16 +870,9 @@ namespace HistorianSyncTool.Forms
                 Dock = DockStyle.Bottom, Height = 36, Font = AppTheme.Small,
                 ForeColor = AppTheme.TextSecondary, TextAlign = ContentAlignment.TopLeft
             };
-            btnScanRest = new FlatButton
-            {
-                Text = "", ButtonStyle = FlatButtonStyle.Secondary,
-                Dock = DockStyle.Right, Width = 130, Visible = false
-            };
-            btnScanRest.Click += btnScanRest_Click;
-
+            // No "Check the rest" button: a scan covers every point (see MainForm.ScanBudget).
             var pnlSummaryRow = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = AppTheme.Surface };
             pnlSummaryRow.Controls.Add(lblOverviewSummary);
-            pnlSummaryRow.Controls.Add(btnScanRest);
 
             pnlOverviewTop.Controls.Add(pnlSummaryRow);
             pnlOverviewTop.Controls.Add(txtOverviewSearch);
@@ -966,7 +958,6 @@ namespace HistorianSyncTool.Forms
 
             hdrOverview.Text          = Loc.T("hdr.overview");
             lnkBackToOverview.Text    = Loc.T("ov.back");
-            btnScanRest.Text          = Loc.T("ov.scanRest");
             lstOverview.EmptyMessage  = Loc.T("ov.empty");
             SetCueBanner(txtOverviewSearch, Loc.T("ov.search"));
             lstOverview.Invalidate();

@@ -201,6 +201,14 @@ namespace HistorianSyncTool.UI.Controls
             return t.ToString("yyyy-MM-dd HH:mm");
         }
 
+        /// <summary>
+        /// One rounding rule for every completeness figure on this control. Only a genuinely
+        /// complete period prints "100 %" — a 2 h shortfall in a 13-day window is 0.6 %, and
+        /// rounding that away would hide exactly what the screen exists to show.
+        /// </summary>
+        internal static string FormatCoverage(double ratio)
+            => ratio >= 0.9995 ? ratio.ToString("P0") : ratio.ToString("P1");
+
         private void DrawTrackLabel(Graphics g, TimelineTrackData data, string fallback, Rectangle rc)
         {
             string label = data != null && !string.IsNullOrEmpty(data.Label) ? data.Label : fallback;
@@ -209,13 +217,70 @@ namespace HistorianSyncTool.UI.Controls
 
             if (data != null && data.CoverageRatio >= 0)
             {
-                string pct = data.CoverageRatio.ToString("P1");
+                string pct = FormatCoverage(data.CoverageRatio);
                 SizeF sz = g.MeasureString(pct, AppTheme.SectionLabel);
                 Color c = data.CoverageRatio >= 0.999 ? AppTheme.Success
                         : data.CoverageRatio >= 0.9 ? AppTheme.TextPrimary
                         : AppTheme.Danger;
                 using (var br = new SolidBrush(c))
                     g.DrawString(pct, AppTheme.SectionLabel, br, rc.Right - sz.Width - 2, rc.Top + 1);
+            }
+        }
+
+        /// <summary>
+        /// Paints one track column by column from <see cref="TimelineTrackData.SegmentShare"/>:
+        /// green from the bottom in proportion to what this server holds, the rest red (the
+        /// other server has those readings) or grey (neither does).
+        ///
+        /// Column-per-pixel, so cost is the track width and not the number of segments.
+        /// </summary>
+        private static void DrawProportionalTrack(Graphics g, TimelineTrackData data, Rectangle rc)
+        {
+            var share = data.SegmentShare;
+            int n = share.Length;
+            var grey = Color.FromArgb(158, 166, 175);
+
+            using (var green = new SolidBrush(AppTheme.Success))
+            using (var red   = new SolidBrush(AppTheme.Danger))
+            using (var grey_ = new SolidBrush(grey))
+            {
+                for (int x = 0; x < rc.Width; x++)
+                {
+                    // Each pixel column averages the segments it covers, so zooming out cannot
+                    // make a bad stretch disappear behind a good one.
+                    int s0 = (int)((long)x * n / rc.Width);
+                    int s1 = (int)(((long)x + 1) * n / rc.Width);
+                    if (s1 <= s0) s1 = s0 + 1;
+                    if (s1 > n) s1 = n;
+
+                    double sum = 0; int have = 0, none = 0;
+                    for (int s = s0; s < s1; s++)
+                    {
+                        if (share[s] < 0) { none++; continue; }
+                        sum += share[s]; have++;
+                    }
+
+                    if (have == 0)
+                    {
+                        g.FillRectangle(grey_, rc.Left + x, rc.Top, 1, rc.Height);
+                        continue;
+                    }
+
+                    double f = sum / have;
+                    if (f < 0) f = 0; else if (f > 1) f = 1;
+
+                    int greenH = (int)Math.Round(f * rc.Height);
+                    // A server that holds SOMETHING must never render as an empty column, and
+                    // one that is missing something must never render as a full one.
+                    if (greenH <= 0 && f > 0)      greenH = 1;
+                    if (greenH >= rc.Height && f < 1) greenH = rc.Height - 1;
+
+                    int missH = rc.Height - greenH;
+                    if (missH > 0)
+                        g.FillRectangle(none > have ? grey_ : red, rc.Left + x, rc.Top, 1, missH);
+                    if (greenH > 0)
+                        g.FillRectangle(green, rc.Left + x, rc.Top + missH, 1, greenH);
+                }
             }
         }
 
@@ -232,9 +297,17 @@ namespace HistorianSyncTool.UI.Controls
                 return;
             }
 
-            // Base: green = data present
-            using (var br = new SolidBrush(AppTheme.Success))
-                g.FillRectangle(br, rc);
+            if (data.SegmentShare != null && data.SegmentShare.Length > 0)
+            {
+                DrawProportionalTrack(g, data, rc);
+            }
+            else
+            {
+                // Base: green = data present. Only for tracks that carry no per-segment detail
+                // (the compact preview timelines); the gap lists below paint over it.
+                using (var br = new SolidBrush(AppTheme.Success))
+                    g.FillRectangle(br, rc);
+            }
 
             // Backfilled-by-tool underline band (drawn first so gaps paint over it if they overlap)
             int bandH = Math.Max(4, rc.Height / 5);
@@ -256,6 +329,12 @@ namespace HistorianSyncTool.UI.Controls
                 }
             }
 
+            // With per-segment detail the colours are already painted in proportion; these two
+            // loops then only register the tooltips and the click-to-zoom targets. Filling here
+            // as well would put a solid block back over a partially-served segment — which is
+            // exactly how a 100 % track ended up 90 % red.
+            bool fillGaps = data.SegmentShare == null || data.SegmentShare.Length == 0;
+
             // Unfillable gaps: gray — missing on BOTH servers
             using (var br = new SolidBrush(Color.FromArgb(158, 166, 175)))
             {
@@ -263,7 +342,7 @@ namespace HistorianSyncTool.UI.Controls
                 {
                     var r = SegRect(u, rc.Top, rc.Height);
                     if (r.Width <= 0) continue;
-                    g.FillRectangle(br, r);
+                    if (fillGaps) g.FillRectangle(br, r);
                     _hits.Add(new Hit
                     {
                         Rect = r,
@@ -282,7 +361,7 @@ namespace HistorianSyncTool.UI.Controls
                 {
                     var r = SegRect(f, rc.Top, rc.Height);
                     if (r.Width <= 0) continue;
-                    g.FillRectangle(br, r);
+                    if (fillGaps) g.FillRectangle(br, r);
                     string why = Loc.T(data.FeasibilityKnown
                         ? "timeline.tip.canCopy"
                         : "timeline.tip.unknown");
@@ -299,8 +378,10 @@ namespace HistorianSyncTool.UI.Controls
             using (var pen = new Pen(AppTheme.Border))
                 g.DrawRectangle(pen, rc.Left, rc.Top, rc.Width - 1, rc.Height - 1);
 
-            // Centered coverage percentage, like the old bars
-            string pct = data.CoverageRatio.ToString("P0");
+            // Centered coverage percentage, like the old bars. SAME rounding as the figure at
+            // the right of the label row — printing "100%" here next to "99.8%" there is two
+            // numbers for one quantity, which is the confusion this screen keeps being fixed for.
+            string pct = FormatCoverage(data.CoverageRatio);
             using (var font = new Font("Segoe UI", Compact ? 8f : 9f, FontStyle.Bold))
             {
                 SizeF sz = g.MeasureString(pct, font);

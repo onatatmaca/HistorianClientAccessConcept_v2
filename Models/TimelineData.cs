@@ -63,5 +63,20 @@ namespace HistorianSyncTool.Models
 
         /// <summary>Shown centered when CoverageRatio &lt; 0 (e.g. "not connected").</summary>
         public string EmptyText = "not analyzed";
+
+        /// <summary>
+        /// Per-segment share of the better-served server, 0..1, left to right; -1 where NEITHER
+        /// server recorded anything. When present the track is painted from this — each segment
+        /// green in proportion to what it holds, the remainder red (the other server has it) or
+        /// grey (-1, nothing to copy).
+        ///
+        /// This exists because the old "fill green, then paint gaps over it" could not tell the
+        /// truth at long ranges. A segment is hours wide there, so it was green if it held ONE
+        /// reading and red if it lacked ONE — and at a one-year zoom both are nearly always
+        /// true. That produced a track labelled 100 % and painted 90 % red, and a list where
+        /// every point looked identical. Proportional painting makes the label and the picture
+        /// the same quantity by construction, so "0 % but green" cannot happen.
+        /// </summary>
+        public double[] SegmentShare;
     }
 }

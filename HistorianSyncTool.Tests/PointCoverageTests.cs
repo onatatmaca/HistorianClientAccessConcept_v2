@@ -30,11 +30,32 @@ namespace HistorianSyncTool.Tests
         // ── Coverage fraction ─────────────────────────────────────────────────────
 
         [TestMethod]
-        public void Coverage_CountsBucketsThatHoldAnything()
+        public void Coverage_IsTheShareOfEverythingRecordedAnywhere()
         {
+            // best per segment = 5, 1, 3, 4 = 13.  main has 12, mirror has 4.
             var p = Make(new[] { 5, 0, 3, 4 }, new[] { 1, 1, 1, 1 });
-            Assert.AreEqual(0.75, p.MainCoverage, 1e-9);
-            Assert.AreEqual(1.0, p.MirrorCoverage, 1e-9);
+            Assert.AreEqual(12.0 / 13.0, p.MainCoverage, 1e-9);
+            Assert.AreEqual(4.0 / 13.0, p.MirrorCoverage, 1e-9);
+        }
+
+        [TestMethod]
+        public void Coverage_DoesNotSaturateWhenEverySegmentIsTouched()
+        {
+            // THE regression this measure exists for. Every segment holds at least one reading
+            // on both servers, which the old "segments touched" measure reported as 100 %/100 %
+            // for essentially every point on a year-long window - so every row in the list
+            // looked identical and a track could be labelled 100 % while painted mostly red.
+            var p = Make(new[] { 100, 100, 100, 100 }, new[] { 100, 1, 100, 100 });
+            Assert.AreEqual(1.0, p.MainCoverage, 1e-9);
+            Assert.AreEqual(301.0 / 400.0, p.MirrorCoverage, 1e-9);
+            Assert.IsTrue(p.MirrorCoverage < 0.8, "a server missing a quarter of the readings must not read as ~100 %");
+        }
+
+        [TestMethod]
+        public void Coverage_IsZeroNotNegativeWhenNeitherServerRecordedAnything()
+        {
+            var p = Make(new[] { 0, 0 }, new[] { 0, 0 });
+            Assert.AreEqual(0.0, p.MainCoverage, 1e-9);
         }
 
         [TestMethod]
@@ -42,6 +63,24 @@ namespace HistorianSyncTool.Tests
         {
             var p = Make(null, new[] { 1, 1 });
             Assert.IsTrue(p.MainCoverage < 0, "unmeasured must be distinguishable from 0 %");
+        }
+
+        // ── Per-segment share (what the bars and the timeline paint) ──────────────
+
+        [TestMethod]
+        public void SegmentShare_IsTheFractionOfTheBetterServedServer()
+        {
+            var share = PointCoverage.SegmentShare(new[] { 5, 0, 2 }, new[] { 10, 0, 1 });
+            Assert.AreEqual(0.5, share[0], 1e-9);
+            Assert.AreEqual(-1.0, share[1], 1e-9, "neither server recorded here - grey, not this server's failure");
+            Assert.AreEqual(1.0, share[2], 1e-9, "holding the most of anyone is complete");
+        }
+
+        [TestMethod]
+        public void SegmentShare_IsZeroWhereOnlyTheOtherServerHasReadings()
+        {
+            var share = PointCoverage.SegmentShare(new[] { 0 }, new[] { 7 });
+            Assert.AreEqual(0.0, share[0], 1e-9, "0 % must be paintable as fully missing, never as green");
         }
 
         // ── One-sided buckets ─────────────────────────────────────────────────────

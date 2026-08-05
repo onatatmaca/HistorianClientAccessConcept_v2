@@ -38,6 +38,26 @@ namespace HistorianSyncTool.UI.Controls
 
         private int _mouseX = -1;
 
+        /// <summary>
+        /// The decimated min/max envelope, one entry per pixel column, cached per series.
+        ///
+        /// Building it walks every reading, and a one-year window on a 10 s point is ~3 million
+        /// of them PER SERVER. That walk used to happen inside OnPaint — so every hover moved
+        /// the crosshair, invalidated the control, and re-decimated six million readings before
+        /// drawing a single line. That is where the lag came from, not from the amount of detail
+        /// on screen. The envelope depends only on (data, width, range), so it is built once and
+        /// reused until one of those changes; nothing about the picture changes.
+        /// </summary>
+        private sealed class Envelope
+        {
+            public int[] Lo, Hi;         // pixel rows, per column
+            public bool[] Has;
+            public int Width;
+            public float Min, Max;
+            public Rectangle Plot;       // rows are absolute, so the plot rect is part of the key
+        }
+        private Envelope _mainEnv, _mirrorEnv;
+
         private static readonly Color MainColor   = Color.FromArgb(30, 58, 95);     // navy
         private static readonly Color MirrorColor = Color.FromArgb(22, 160, 133);   // teal
 
@@ -68,6 +88,7 @@ namespace HistorianSyncTool.UI.Controls
             _mainMissing   = mainMissing   ?? new List<TimeRange>();
             _mirrorMissing = mirrorMissing ?? new List<TimeRange>();
             _mainLabel = mainLabel ?? ""; _mirrorLabel = mirrorLabel ?? "";
+            _mainEnv = _mirrorEnv = null;   // new data: the cached envelope no longer describes it
             Invalidate();
         }
 
@@ -86,6 +107,7 @@ namespace HistorianSyncTool.UI.Controls
             _mainMissing = new List<TimeRange>();
             _mirrorMissing = new List<TimeRange>();
             _hasRange = false;
+            _mainEnv = _mirrorEnv = null;
             Invalidate();
         }
 
@@ -146,8 +168,8 @@ namespace HistorianSyncTool.UI.Controls
             float min, max;
             ComputeRange(out min, out max);   // shared scale: level differences stay visible
 
-            DrawPlot(g, top,    _main,   _mainMissing,   MainColor,   _mainLabel,   min, max, false);
-            DrawPlot(g, bottom, _mirror, _mirrorMissing, MirrorColor, _mirrorLabel, min, max, true);
+            DrawPlot(g, top,    _main,   _mainMissing,   MainColor,   _mainLabel,   min, max, false, ref _mainEnv);
+            DrawPlot(g, bottom, _mirror, _mirrorMissing, MirrorColor, _mirrorLabel, min, max, true,  ref _mirrorEnv);
 
             // On the main screen the completeness timeline sits directly above on the SAME
             // time span and carries the dates — a second axis here would just repeat it. The
@@ -160,7 +182,7 @@ namespace HistorianSyncTool.UI.Controls
 
         private void DrawPlot(Graphics g, Rectangle plot,
             List<(DateTime Time, float Value, double Quality)> data, List<TimeRange> missing,
-            Color color, string label, float min, float max, bool dashed)
+            Color color, string label, float min, float max, bool dashed, ref Envelope cache)
         {
             var labelFont = Large ? AppTheme.Default : AppTheme.Small;
 
@@ -178,7 +200,7 @@ namespace HistorianSyncTool.UI.Controls
             DrawGrid(g, plot, min, max, labelFont);
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            DrawSeries(g, data, color, plot, min, max, dashed);
+            DrawSeries(g, data, color, plot, min, max, dashed, ref cache);
             g.SmoothingMode = SmoothingMode.None;
 
             using (var pen = new Pen(AppTheme.Border))
@@ -270,25 +292,41 @@ namespace HistorianSyncTool.UI.Controls
         /// of being sampled away.
         /// </summary>
         private void DrawSeries(Graphics g, List<(DateTime Time, float Value, double Quality)> data,
-            Color color, Rectangle plot, float min, float max, bool dashed)
+            Color color, Rectangle plot, float min, float max, bool dashed, ref Envelope cache)
         {
             if (data == null || data.Count == 0) return;
 
             int w = plot.Width;
-            var loY = new int[w]; var hiY = new int[w]; var has = new bool[w];
             long total = (_to - _from).Ticks;
             if (total <= 0) return;
 
-            foreach (var s in data)
+            // Identical inputs give an identical envelope, so build it only when they change.
+            // A hover redraw then costs one pass over `w` columns instead of over millions of
+            // readings — same picture, same detail, none of the lag.
+            if (cache == null || cache.Width != w || cache.Min != min || cache.Max != max
+                || cache.Plot != plot)
             {
-                double f = (double)(s.Time - _from).Ticks / total;
-                if (f < 0 || f > 1) continue;
-                int col = (int)(f * (w - 1));
-                if (col < 0 || col >= w) continue;
-                int y = plot.Bottom - 1 - (int)((s.Value - min) / (max - min) * (plot.Height - 2));
-                if (!has[col]) { has[col] = true; loY[col] = hiY[col] = y; }
-                else { if (y < loY[col]) loY[col] = y; if (y > hiY[col]) hiY[col] = y; }
+                var e = new Envelope
+                {
+                    Width = w, Min = min, Max = max, Plot = plot,
+                    Lo = new int[w], Hi = new int[w], Has = new bool[w]
+                };
+                // Values are mapped to a pixel ROW here; that is why the cache is keyed on the
+                // plot height's inputs (min/max) as well as the width.
+                double scale = (plot.Height - 2) / (double)(max - min);
+                foreach (var s in data)
+                {
+                    double f = (double)(s.Time - _from).Ticks / total;
+                    if (f < 0 || f > 1) continue;
+                    int col = (int)(f * (w - 1));
+                    if (col < 0 || col >= w) continue;
+                    int y = plot.Bottom - 1 - (int)((s.Value - min) * scale);
+                    if (!e.Has[col]) { e.Has[col] = true; e.Lo[col] = e.Hi[col] = y; }
+                    else { if (y < e.Lo[col]) e.Lo[col] = y; if (y > e.Hi[col]) e.Hi[col] = y; }
+                }
+                cache = e;
             }
+            int[] loY = cache.Lo, hiY = cache.Hi; bool[] has = cache.Has;
 
             using (var pen = new Pen(color, Large ? 1.6f : 1.3f))
             {

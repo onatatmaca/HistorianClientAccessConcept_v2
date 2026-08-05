@@ -277,8 +277,7 @@ namespace HistorianSyncTool.Forms
                 var demo = (DemoDataService)_data;
                 dtpStart.Value = demo.SuggestedFrom;
                 dtpEnd.Value   = demo.SuggestedTo;
-                txtPrimary.Text   = "DEMO-MAIN";
-                txtSecondary.Text = "DEMO-MIRROR";
+                // Host names are set in LoadSettings, before anything derives from them.
                 UpdateConnectionStatus();
             }
 
@@ -459,10 +458,15 @@ namespace HistorianSyncTool.Forms
 
         // ── All-points overview (Phase 12b) ────────────────────────────────────────
 
-        /// <summary>Wall-clock budget for one overview scan. The boss's requirement is that
-        /// the landing screen appears quickly; anything not reached in time is shown as
-        /// "not checked yet" with a button to finish, never silently dropped.</summary>
-        private static readonly TimeSpan ScanBudget = TimeSpan.FromSeconds(10);
+        /// <summary>
+        /// A scan checks EVERY point, however long it takes (boss decision 2026-08-05). There
+        /// was a 10 s budget with a "Check the rest" button for whatever it did not reach; a
+        /// partial answer to "what is missing?" turned out to be worse than a slower complete
+        /// one — the user has to remember to press a second button, and until they do the
+        /// totals are silently short. The scan still runs off the UI thread behind the progress
+        /// dialog and is still cancellable. Measured: 273 points over a full year ≈ 35 s.
+        /// </summary>
+        private static readonly TimeSpan ScanBudget = TimeSpan.Zero;   // Zero = no limit
 
         private CoverageScan _lastScan;
         private string _overviewVerdict = "";
@@ -509,12 +513,6 @@ namespace HistorianSyncTool.Forms
         {
             lstOverview.SetFilter(txtOverviewSearch.Text);
             UpdateOverviewSummary();
-        }
-
-        private async void btnScanRest_Click(object sender, EventArgs e)
-        {
-            // Finish what the budget cut short — same scan, no time limit this time.
-            await ScanOverview(TimeSpan.Zero);
         }
 
         /// <summary>
@@ -617,7 +615,6 @@ namespace HistorianSyncTool.Forms
             if (_lastScan == null)
             {
                 lblOverviewSummary.Text = "";
-                btnScanRest.Visible = false;
                 return;
             }
 
@@ -635,8 +632,8 @@ namespace HistorianSyncTool.Forms
                 + "   ·   " + Loc.F("ov.resolution", FormatDuration(_lastScan.BucketSpan))
                 + "   ·   " + Loc.T("ov.estimateNote");
 
-            // Honest about what was left out, with the way to finish it.
-            btnScanRest.Visible = _lastScan.Truncated;
+            // A scan has no time limit any more, so Truncated can only mean the user cancelled.
+            // Still say so — a short total must never pass for a complete answer.
             if (_lastScan.Truncated)
             {
                 _overviewVerdict = Loc.F("ov.truncated",
@@ -910,8 +907,13 @@ namespace HistorianSyncTool.Forms
             // Both server fields offer everything that has connected before. Items first,
             // then the text — the last-used pair stays what the app opens with.
             LoadServerHistory();
-            txtPrimary.Text   = s.PrimaryHostname;
-            txtSecondary.Text = s.SecondaryHostname;
+
+            // A demo session must never display a real server's address: the whole point of
+            // --demo is that a screenshot cannot be mistaken for live data. Setting these
+            // AFTER the settings load (as it used to be) left the persisted addresses in the
+            // header strip and on the timeline tracks, because those are derived earlier.
+            txtPrimary.Text   = _demoMode ? "DEMO-MAIN"   : s.PrimaryHostname;
+            txtSecondary.Text = _demoMode ? "DEMO-MIRROR" : s.SecondaryHostname;
             txtTagnameFilter.Text = s.TagnameFilter;
 
             dtpStart.Value = s.StartDate > DateTime.MinValue
@@ -2892,6 +2894,7 @@ namespace HistorianSyncTool.Forms
                 List<CopyableSegment> copyable = null;
                 string stripNote = null;
                 double priCoverage = -1, secCoverage = -1;
+                double[] priShare = null, secShare = null;
                 var priFill = new List<TimeRange>(); var priUnfill = new List<TimeRange>();
                 var secFill = new List<TimeRange>(); var secUnfill = new List<TimeRange>();
                 List<TimeRange> priBack = null, secBack = null;
@@ -2976,13 +2979,25 @@ namespace HistorianSyncTool.Forms
                     // rule "silence > 580 s") as 19.7 days of missing data. Both were
                     // arithmetically right and answered different questions under one label.
                     //
-                    // Now: green = the server holds readings in that segment, grey = NEITHER
-                    // does (nothing to copy), red = exactly what SyncPlanner would copy here.
-                    // Red therefore means "this will be restored", which is what the legend
-                    // has always claimed. The p90 rule stays for the Advanced track caption.
+                    // The segment-fill version that replaced it was still all-or-nothing per
+                    // segment, and at a one-year zoom a segment is ~15 h wide: green if it held
+                    // ONE reading, red if it lacked ONE. Measured live on
+                    // STAT6.TEMPRL_01_BHKW02_SCALE.F_CV over a year, that produced a track
+                    // LABELLED 100 % and PAINTED 90 % red, and a list where every point looked
+                    // identical at ~100 %.
+                    //
+                    // Now both cards use one measure: per segment, the share of the readings the
+                    // better-served server has (`CoverageScanner.SegmentShare`). The track is
+                    // painted green in proportion to that share, so the percentage and the
+                    // picture are the same quantity — "0 % but green" cannot happen — and the
+                    // same point reads 99.5 % / 98.8 % on both screens.
                     int segs = TimelineSegments(from, to);
-                    priCoverage = SegmentCoverage(priOnPrimary,   from, to, segs);
-                    secCoverage = SegmentCoverage(secOnSecondary, from, to, segs);
+                    var priCounts = SegmentCounts(priOnPrimary,   from, to, segs);
+                    var secCounts = SegmentCounts(secOnSecondary, from, to, segs);
+                    priShare = priCounts != null ? PointCoverage.SegmentShare(priCounts, secCounts) : null;
+                    secShare = secCounts != null ? PointCoverage.SegmentShare(secCounts, priCounts) : null;
+                    priCoverage = ShareAverage(priCounts, secCounts);
+                    secCoverage = ShareAverage(secCounts, priCounts);
                     var bothEmpty = BothEmptySegments(priOnPrimary, secOnSecondary, from, to, segs);
                     priUnfill.AddRange(bothEmpty);
                     secUnfill.AddRange(bothEmpty);
@@ -3015,8 +3030,8 @@ namespace HistorianSyncTool.Forms
                 _lastSecondaryResult = secResult;
                 _lastDiffRows        = diffRows ?? new List<DiffSummaryRow>();
 
-                var priTrack = BuildTrack(priResult, ServerNaming.PrimaryLabel, priHost, priFeasKnown, priFill, priUnfill, priBack, priCoverage, priNotSetUp);
-                var secTrack = BuildTrack(secResult, ServerNaming.SecondaryLabel, secHost, secFeasKnown, secFill, secUnfill, secBack, secCoverage, secNotSetUp);
+                var priTrack = BuildTrack(priResult, ServerNaming.PrimaryLabel, priHost, priFeasKnown, priFill, priUnfill, priBack, priCoverage, priNotSetUp, priShare);
+                var secTrack = BuildTrack(secResult, ServerNaming.SecondaryLabel, secHost, secFeasKnown, secFill, secUnfill, secBack, secCoverage, secNotSetUp, secShare);
                 UpdateGapAnalysisUI(from, to, priTrack, secTrack, copyable, stripNote,
                     priNotSetUp ? ServerNaming.Display(ServerNaming.PrimaryLabel, priHost)
                   : secNotSetUp ? ServerNaming.Display(ServerNaming.SecondaryLabel, secHost)
@@ -3050,14 +3065,42 @@ namespace HistorianSyncTool.Forms
             return Math.Max(120, Math.Min(600, width));
         }
 
-        /// <summary>Fraction of segments in which this server holds at least one reading.</summary>
-        private static double SegmentCoverage(List<DateTime> times, DateTime from, DateTime to, int segments)
+        /// <summary>
+        /// Share of everything recorded for this point that this server holds — the SAME
+        /// definition as <c>PointCoverage.MainCoverage</c>, so the list and this screen cannot
+        /// print different completeness for the same point.
+        /// </summary>
+        private static double ShareAverage(int[] mine, int[] other)
         {
-            if (times == null) return -1;
-            var filled = FillMap(times, from, to, segments);
-            int with = 0;
-            for (int i = 0; i < segments; i++) if (filled[i]) with++;
-            return (double)with / segments;
+            if (mine == null) return -1;
+            long sumMine = 0, sumBest = 0;
+            for (int i = 0; i < mine.Length; i++)
+            {
+                int o = (other != null && i < other.Length) ? other[i] : 0;
+                sumMine += mine[i];
+                sumBest += Math.Max(mine[i], o);
+            }
+            return sumBest == 0 ? 0.0 : (double)sumMine / sumBest;
+        }
+
+        /// <summary>Readings per segment — the same quantity the overview scan gets from
+        /// <c>CalculatedQuery(Count)</c>, so both cards can use one definition of "complete".</summary>
+        private static int[] SegmentCounts(List<DateTime> times, DateTime from, DateTime to, int segments)
+        {
+            if (times == null) return null;
+            var counts = new int[segments];
+            long span = (to - from).Ticks;
+            if (span <= 0) return counts;
+            long step = Math.Max(1, span / segments);
+            foreach (var t in times)
+            {
+                long off = t.Ticks - from.Ticks;
+                if (off < 0) continue;
+                int i = (int)(off / step);
+                if (i >= segments) i = segments - 1;
+                counts[i]++;
+            }
+            return counts;
         }
 
         private static bool[] FillMap(List<DateTime> times, DateTime from, DateTime to, int segments)
@@ -3218,7 +3261,8 @@ namespace HistorianSyncTool.Forms
         /// <summary>Packs one server's analysis into the data the timeline track needs.</summary>
         private TimelineTrackData BuildTrack(GapAnalysisResult result, string sideLabel, string host,
             bool feasibilityKnown, List<TimeRange> fillable, List<TimeRange> unfillable,
-            List<TimeRange> backfilled, double segmentCoverage, bool notSetUp = false)
+            List<TimeRange> backfilled, double segmentCoverage, bool notSetUp = false,
+            double[] segmentShare = null)
         {
             // sideLabel is the INTERNAL role ("Primary"/"Secondary"); everything the user
             // sees goes through ServerNaming.
@@ -3258,7 +3302,13 @@ namespace HistorianSyncTool.Forms
                 FeasibilityKnown = feasibilityKnown,
                 FillableGaps     = fillable   ?? new List<TimeRange>(),
                 UnfillableGaps   = unfillable ?? new List<TimeRange>(),
-                Backfilled       = backfilled ?? new List<TimeRange>()
+                Backfilled       = backfilled ?? new List<TimeRange>(),
+                // Drives the proportional painting; without it the track falls back to
+                // "green, minus the gap rectangles" (the compact preview timelines).
+                // Passed even when this server holds NOTHING — that is the case that used to
+                // render solid green under a 0 % label, and an all-zero count array is exactly
+                // what makes it come out red (the other server has it) or grey (neither does).
+                SegmentShare     = segmentShare
             };
         }
 

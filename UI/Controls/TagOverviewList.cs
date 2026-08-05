@@ -200,20 +200,42 @@ namespace HistorianSyncTool.UI.Controls
                 return;
             }
 
-            int n = mine.Length;
-            for (int i = 0; i < n; i++)
+            // Proportional, not all-or-nothing. "Segment holds >= 1 reading -> solid green" made
+            // every row look identical: measured live over a year (segments ~15 h wide), all 600
+            // segments held at least one reading on both servers for essentially every point, so
+            // every bar was solid green at 100 %. Each segment is now green in proportion to the
+            // share of readings this server has of whatever the better-served one has, which is
+            // the same number printed beside the bar.
+            var share = PointCoverage.SegmentShare(mine, other);
+            int n = share.Length;
+            var grey = Color.FromArgb(158, 166, 175);
+            using (var brGreen = new SolidBrush(AppTheme.Success))
+            using (var brRed   = new SolidBrush(AppTheme.Danger))
+            using (var brGrey  = new SolidBrush(grey))
             {
-                int x1 = rect.Left + (int)((long)i * rect.Width / n);
-                int x2 = rect.Left + (int)((long)(i + 1) * rect.Width / n);
-                if (x2 <= x1) x2 = x1 + 1;
+                for (int i = 0; i < n; i++)
+                {
+                    int x1 = rect.Left + (int)((long)i * rect.Width / n);
+                    int x2 = rect.Left + (int)((long)(i + 1) * rect.Width / n);
+                    if (x2 <= x1) x2 = x1 + 1;
+                    int w = x2 - x1;
 
-                Color c;
-                if (mine[i] > 0) c = AppTheme.Success;
-                else if (other != null && i < other.Length && other[i] > 0) c = AppTheme.Danger;
-                else c = Color.FromArgb(158, 166, 175);
+                    if (share[i] < 0)   // neither server recorded anything here
+                    {
+                        g.FillRectangle(brGrey, x1, rect.Top, w, rect.Height);
+                        continue;
+                    }
 
-                using (var br = new SolidBrush(c))
-                    g.FillRectangle(br, x1, rect.Top, x2 - x1, rect.Height);
+                    int greenH = (int)Math.Round(share[i] * rect.Height);
+                    // Holding something must never look empty; missing something must never
+                    // look full — at this bar height a rounding step is ~8 % of the segment.
+                    if (greenH <= 0 && share[i] > 0)          greenH = 1;
+                    if (greenH >= rect.Height && share[i] < 1) greenH = rect.Height - 1;
+
+                    int missH = rect.Height - greenH;
+                    if (missH > 0)  g.FillRectangle(brRed,   x1, rect.Top, w, missH);
+                    if (greenH > 0) g.FillRectangle(brGreen, x1, rect.Top + missH, w, greenH);
+                }
             }
 
             using (var pen = new Pen(AppTheme.Border))

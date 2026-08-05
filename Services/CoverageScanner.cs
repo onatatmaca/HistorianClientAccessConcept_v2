@@ -38,8 +38,22 @@ namespace HistorianSyncTool.Services
 
         public int Buckets => Main != null ? Main.Length : (Mirror != null ? Mirror.Length : 0);
 
-        public double MainCoverage   => Fraction(Main);
-        public double MirrorCoverage => Fraction(Mirror);
+        public double MainCoverage   => ShareOfBest(Main, Mirror);
+        public double MirrorCoverage => ShareOfBest(Mirror, Main);
+
+        /// <summary>
+        /// Fraction of segments holding at least one reading. NOT the headline number — it
+        /// saturates at 100 % on almost any long window (see <see cref="ShareOfBest"/>) — but
+        /// the density gates below still want it, because "is this server recording here at
+        /// all?" is a different question from "does it have as much as the other one".
+        /// </summary>
+        private static double SegmentsTouched(int[] counts)
+        {
+            if (counts == null || counts.Length == 0) return -1;
+            int with = 0;
+            for (int i = 0; i < counts.Length; i++) if (counts[i] > 0) with++;
+            return (double)with / counts.Length;
+        }
 
         /// <summary>
         /// Estimated readings the mirror is missing (buckets where only the main server has
@@ -57,9 +71,14 @@ namespace HistorianSyncTool.Services
         /// True when BOTH servers record in nearly every segment, so the segment counts are
         /// dense enough to compare against each other. Below that, a server's silence in a
         /// segment is just its cadence and count differences are noise.
+        ///
+        /// Deliberately <see cref="SegmentsTouched"/>, not the headline coverage: this gate asks
+        /// "is each server recording throughout the window?", which is what the estimate was
+        /// calibrated against (see the measured table in known-issues.md). Swapping in
+        /// share-of-best here would silently re-tune the estimate.
         /// </summary>
         private bool DenseEnoughToCompare =>
-            MainCoverage >= 0.8 && MirrorCoverage >= 0.8 && SameRecordingRate;
+            SegmentsTouched(Main) >= 0.8 && SegmentsTouched(Mirror) >= 0.8 && SameRecordingRate;
 
         /// <summary>
         /// True when both servers record at a comparable overall rate. Two servers logging the
@@ -132,13 +151,62 @@ namespace HistorianSyncTool.Services
             Severity > 0      ? 0 :
                                 4;
 
-        private static double Fraction(int[] counts)
+        /// <summary>
+        /// How much of everything recorded for this point ANYWHERE this server actually holds.
+        ///
+        /// The old measure was "fraction of segments holding at least one reading", and it
+        /// destroyed the screen at long ranges: measured live on
+        /// STAT6.TEMPRL_01_BHKW02_SCALE.F_CV over a year (600 segments of 14.6 h), every single
+        /// segment held at least one reading on both servers, so it reported **100.0 % / 100.0 %**
+        /// — as it did for nearly every other point, which is why every row in the list looked
+        /// identical. The same data under this measure reads **99.5 % / 98.8 %**.
+        ///
+        /// Per segment the yardstick is the BETTER-served server, not an absolute expectation:
+        /// this tool can only ever make one server match the other, so "complete" means "has
+        /// what the other one has". That also survives deadband tags, where the recording rate
+        /// legitimately varies — both servers see the same deadband, so the ratio stays ~1.
+        /// </summary>
+        private static double ShareOfBest(int[] mine, int[] other)
         {
-            if (counts == null || counts.Length == 0) return -1;
-            int with = 0;
-            for (int i = 0; i < counts.Length; i++) if (counts[i] > 0) with++;
-            return (double)with / counts.Length;
+            if (mine == null || mine.Length == 0) return -1;
+            long sumMine = 0, sumBest = 0;
+            int n = other != null ? Math.Min(mine.Length, other.Length) : mine.Length;
+            for (int i = 0; i < n; i++)
+            {
+                int o = other != null ? other[i] : 0;
+                sumMine += mine[i];
+                sumBest += Math.Max(mine[i], o);
+            }
+            // Nothing recorded anywhere in this window: neither server is incomplete relative
+            // to the other. Reporting 0 % would blame both for a plant-wide silence.
+            if (sumBest == 0) return 0.0;
+            return (double)sumMine / sumBest;
         }
+
+        /// <summary>
+        /// Per-segment share of the better-served server, 0..1, for drawing. A segment where
+        /// neither server recorded anything is -1 ("nothing here on either side"), which the
+        /// bars render grey rather than as this server's failure.
+        /// </summary>
+        public static double[] SegmentShare(int[] mine, int[] other)
+        {
+            if (mine == null || mine.Length == 0) return new double[0];
+            int n = mine.Length;
+            var share = new double[n];
+            for (int i = 0; i < n; i++)
+            {
+                int o = (other != null && i < other.Length) ? other[i] : 0;
+                int best = Math.Max(mine[i], o);
+                share[i] = best == 0 ? -1.0 : (double)mine[i] / best;
+            }
+            return share;
+        }
+
+        /// <summary>Segment shares for this point's main server (see <see cref="SegmentShare"/>).</summary>
+        public double[] MainShare   => SegmentShare(Main, Mirror);
+
+        /// <summary>Segment shares for this point's mirror.</summary>
+        public double[] MirrorShare => SegmentShare(Mirror, Main);
 
         /// <summary>
         /// Readings one server holds inside a REAL outage on the other — not merely inside a
