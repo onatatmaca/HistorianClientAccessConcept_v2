@@ -67,7 +67,10 @@ if (Test-Path $cfg) {
 
 # --- documentation ------------------------------------------------------------------------
 $docs = Join-Path $repo 'docs'
-foreach ($d in @('Handbuch-DE.docx', 'Manual-EN.docx', 'Manual-EN.html', 'Handbuch-DE.html')) {
+# Word only. The HTML renders are still built by tools\build-docs.ps1 for reading in a browser,
+# but the manual that goes to testers is the .docx - it matches the house document format and
+# they can edit it.
+foreach ($d in @('Handbuch-DE.docx', 'Manual-EN.docx')) {
     $p = Join-Path $docs $d
     if (Test-Path $p) { Copy-Item $p $stage }
     else { Write-Host "  (note: $d not built yet)" -ForegroundColor Yellow }
