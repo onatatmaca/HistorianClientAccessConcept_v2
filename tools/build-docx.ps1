@@ -167,10 +167,17 @@ function Rewrap([string[]]$lines){
             if($buf){ [void]$out.Add($buf); $buf = $null }
             [void]$out.Add($ln); continue }
         if($inCode){ [void]$out.Add($ln); continue }
-        if(IsStructural $ln){
+        if($ln -match '^>\s?(.*)$'){
+            # A quote wrapped over several lines is ONE quote. Left per-line it became four
+            # paragraphs inside the same orange bar, with a gap between each.
+            $q = $matches[1].Trim()
+            if($buf -is [string] -and $buf.StartsWith('>')){ $buf = $buf.TrimEnd() + ' ' + $q }
+            else { if($buf){ [void]$out.Add($buf) }; $buf = '> ' + $q }
+        } elseif(IsStructural $ln){
             if($buf){ [void]$out.Add($buf); $buf = $null }
             [void]$out.Add($ln)
         } else {
+            if($buf -is [string] -and $buf.StartsWith('>')){ [void]$out.Add($buf); $buf = $null }
             if($buf){ $buf = $buf.TrimEnd() + ' ' + $ln.Trim() } else { $buf = $ln.Trim() }
         }
     }
@@ -251,7 +258,7 @@ function ConvertBody([string[]]$lines, [string]$lang){
             # pBdr BEFORE ind: the children of w:pPr have a fixed schema order (pStyle, numPr,
             # pBdr, shd, spacing, ind, jc, rPr). Word rejects the whole document as corrupt if
             # they are out of order, with no hint as to which element is at fault.
-            [void]$sb.Append('<w:p><w:pPr><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="F39C12"/></w:pBdr><w:ind w:left="284"/></w:pPr>' + (Runs $matches[1]) + '</w:p>')
+            [void]$sb.Append('<w:p><w:pPr><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="F39C12"/></w:pBdr><w:spacing w:before="80" w:after="120" w:line="240" w:lineRule="auto"/><w:ind w:left="284"/></w:pPr>' + (Runs $matches[1]) + '</w:p>')
             continue
         }
         if($ln -match '^\s*[-*]\s+(.*)$'){
@@ -289,15 +296,19 @@ function CoverAndToc([string]$lang, [string]$title){
     [void]$sb.Append('<w:p/><w:p/>')
     [void]$sb.Append((ImageParagraph $logo 2200000))
     [void]$sb.Append('<w:p/><w:p/>')
+    # Built from character codes, never typed as literals. This file has no BOM and PowerShell
+    # 5.1 reads it as ANSI, so a literal "für" arrives as two mojibake characters and prints
+    # "fÃ¼r" on the cover page. Same for "Veröffentlicht" below.
+    $uUml = [char]0xFC; $oUml = [char]0xF6
     $docWord = if($lang -eq 'de'){ 'Dokumentation' } else { 'Documentation' }
-    $forWord = if($lang -eq 'de'){ 'für' } else { 'for' }
+    $forWord = if($lang -eq 'de'){ 'f' + $uUml + 'r' } else { 'for' }
     foreach($t in @($docWord, $forWord)){
         [void]$sb.Append('<w:p><w:pPr><w:pStyle w:val="KeinLeerraum"/><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="36"/></w:rPr><w:t xml:space="preserve">' + (Esc $t) + '</w:t></w:r></w:p>')
     }
     [void]$sb.Append('<w:p><w:pPr><w:pStyle w:val="KeinLeerraum"/><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="52"/></w:rPr><w:t xml:space="preserve">' + (Esc $title) + '</w:t></w:r></w:p>')
     [void]$sb.Append('<w:p/><w:p/><w:p/><w:p/>')
     $rows = if($lang -eq 'de'){
-        @(@('Bearbeiter:', $Author), @('Veröffentlicht:', $Published), @('Letzte Fassung', $Published), @('Version', '2.1'))
+        @(@('Bearbeiter:', $Author), @('Ver' + $oUml + 'ffentlicht:', $Published), @('Letzte Fassung', $Published), @('Version', '2.1'))
     } else {
         @(@('Author:', $Author), @('Published:', $Published), @('Last revision', $Published), @('Version', '2.1'))
     }
@@ -365,6 +376,25 @@ function BuildDoc([string]$mdFile, [string]$outFile, [string]$lang, [string]$tit
       'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
       '<w:body>' + $body + $sect + '</w:body></w:document>'
     [IO.File]::WriteAllText((Join-Path $work 'word\document.xml'), $doc, (New-Object Text.UTF8Encoding $false))
+
+    # The template's page header pulls the current chapter name in with a STYLEREF field. In the
+    # generated document that field fails on most pages and Word prints
+    # "Error! Use the Home tab to apply Ueberschrift 1 to the text that you want to appear here."
+    # across the whole manual. Replace it with static text: the header is decoration, an error
+    # message on every page is not worth a nicety. The ORmatic logo beside it is untouched.
+    $script:headerText = if($lang -eq 'de'){ "$title  -  Handbuch 2.1" } else { "$title  -  Manual 2.1" }
+    $script:hdrDone = $false
+    $hdrPath = Join-Path $work 'word\header1.xml'
+    $hdr = [IO.File]::ReadAllText($hdrPath)
+    $hdr = [regex]::Replace($hdr, '<w:instrText[^>]*>.*?</w:instrText>', '')
+    $hdr = [regex]::Replace($hdr, '<w:fldChar[^>]*/>', '')
+    $hdr = [regex]::Replace($hdr, '(<w:t[^>]*>)(.*?)(</w:t>)', {
+        param($m)
+        if($script:hdrDone){ return $m.Groups[1].Value + $m.Groups[3].Value }
+        $script:hdrDone = $true
+        return $m.Groups[1].Value + [System.Security.SecurityElement]::Escape($script:headerText) + $m.Groups[3].Value
+    })
+    [IO.File]::WriteAllText($hdrPath, $hdr, (New-Object Text.UTF8Encoding $false))
 
     # PATCH the template's relationships; do NOT rewrite them.
     #
